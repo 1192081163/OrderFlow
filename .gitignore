@@ -29,6 +29,9 @@ order_excels_dedup/
 
 # Tests that depend on local business sample files
 tests/test_extract_rules.py
+tests/test_full_diff_reasons.py
+tests/test_problem_orders_tool.py
+tests/test_special_template_queue.py
 
 # macOS
 .DS_Store
