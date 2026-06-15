@@ -256,6 +256,8 @@ class ExtractedRow:
     notes: list[str] = field(default_factory=list)
     manual_check: list[str] = field(default_factory=list)
     source_file: str = ""
+    parts_w_multiplier: float = 1.43
+    parts_extra: float = 0.0
 
     def add_manual_check(self, message: str) -> None:
         if message not in self.manual_check:
@@ -510,7 +512,7 @@ def profile_tables_over_size_qty(ws: Any) -> float:
     headers = find_sheet1_profile_headers(ws)
     for header_index, (header_row, profile_col) in enumerate(headers):
         next_header_row = headers[header_index + 1][0] if header_index + 1 < len(headers) else ws.max_row + 1
-        product_qty_col = sheet1_product_qty_column(ws, header_row)
+        product_qty_col = sheet1_product_qty_column(ws, header_row, profile_col)
         width_cols = sheet1_width_columns(ws, header_row)
         for idx in range(header_row + 1, next_header_row):
             if row_looks_cavity_table_header(ws, idx):
@@ -526,6 +528,10 @@ def profile_tables_over_size_qty(ws: Any) -> float:
             if product_qty <= 0:
                 continue
             max_width = max([width_value(ws.cell(idx, col).value) for col in width_cols] or [0])
+            if ws.title == "Main Sheet":
+                hand = clean_text(ws.cell(idx, 5).value).upper()
+                if "DOUBLE" not in hand:
+                    continue
             if max_width > OVER_SIZE_WIDTH_THRESHOLD:
                 qty_total += float(product_qty)
     return qty_total + cavity_without_profile_over_size_qty(ws)
@@ -899,6 +905,7 @@ def extract_worksheet_workbook(path: Path, row: ExtractedRow, wb: Any, infer_man
     materials: list[str] = []
     goods_totals: dict[str, float] = {}
     v_total = 0.0
+    w_total = 0.0
     x_total = 0.0
     mitre_total = 0.0
     double_qty = 0.0
@@ -906,6 +913,7 @@ def extract_worksheet_workbook(path: Path, row: ExtractedRow, wb: Any, infer_man
 
     for idx in detail_rows:
         material_raw = ws[f"A{idx}"].value
+        material_is_other = clean_text(material_raw).lower() == "other"
         qty = number_or_none(ws[f"C{idx}"].value) or 0
         profile = ws[f"D{idx}"].value
         goods = classify_goods_with_context(profile, row_context(ws, idx), row)
@@ -919,17 +927,22 @@ def extract_worksheet_workbook(path: Path, row: ExtractedRow, wb: Any, infer_man
             default_code = cavity_slider_default_material(profile)
             if default_code:
                 materials.append(default_code)
-        if clean_text(material_raw).lower() != "other":
+        if not material_is_other:
             add_goods(goods_totals, worksheet_goods_bucket(profile, goods), qty)
             max_width = max(width_value(ws[f"G{idx}"].value), width_value(ws[f"I{idx}"].value))
             if qty > 0 and max_width > OVER_SIZE_WIDTH_THRESHOLD:
                 over_size_qty += float(qty)
 
-        if not is_cavity:
+        line_v = 0.0
+        if not is_cavity and not material_is_other:
             hinge = parse_hinge_qty(ws[f"I{idx}"].value)
             striker = parse_striker_qty(ws[f"K{idx}"].value, ws[f"R{idx}"].value)
             sill = 1 if has_value(ws[f"M{idx}"].value) else 0
-            line_v = qty * (hinge + striker + sill)
+            if "SCREW FIXED PREP" in clean_text(ws[f"J{idx}"].value).upper():
+                line_v = qty * (striker + sill)
+                w_total += qty * hinge
+            else:
+                line_v = qty * (hinge + striker + sill)
             if goods == "KD":
                 line_v += qty * 4
             line_v += deluxe_cleats_extra_parts(path, profile, goods, qty)
@@ -964,6 +977,9 @@ def extract_worksheet_workbook(path: Path, row: ExtractedRow, wb: Any, infer_man
         elif row.values[11] == "KD":
             row.values[19] = 0
         row.values[21] = excel_display_int(v_total)
+        if w_total:
+            row.values[22] = excel_display_int(w_total)
+            row.parts_w_multiplier = 1.0
         if x_total:
             row.values[23] = excel_display_int(x_total)
 
@@ -1035,7 +1051,7 @@ def extract_main_workbook(path: Path, row: ExtractedRow, wb: Any, infer_manual: 
         row.values[15] = format_date(completion)
         row.values[16] = completion.strftime("%A") if completion else None
 
-    if find_sheet1_profile_headers(ws):
+    if find_sheet1_profile_headers(ws) or find_sheet1_profileless_table_headers(ws):
         extract_profile_tables(ws, row, infer_manual=infer_manual)
         return
 
@@ -1216,12 +1232,21 @@ def sheet1_header_text(ws: Any, header_row: int, col_idx: int) -> str:
     return " ".join(parts).upper()
 
 
-def sheet1_product_qty_column(ws: Any, header_row: int) -> int | None:
+def sheet1_qty_column_is_hardware(ws: Any, header_row: int, col_idx: int) -> bool:
+    header = sheet1_header_text(ws, header_row, col_idx)
+    if any(token in header for token in ("HINGE", "STRIKER", "DYNA", "BOLT", "PLATE")):
+        return True
+    prev_header = sheet1_header_text(ws, header_row, col_idx - 1) if col_idx > 1 else ""
+    next_header = sheet1_header_text(ws, header_row, col_idx + 1) if col_idx < ws.max_column else ""
+    return "HINGE" in next_header or "TO SUIT" in next_header or "HAND" in prev_header
+
+
+def sheet1_product_qty_column(ws: Any, header_row: int, profile_col: int | None = None) -> int | None:
     for col_idx in range(1, ws.max_column + 1):
         header = sheet1_header_text(ws, header_row, col_idx)
         if not re.search(r"\b(QTY|QUANTITY)\b", header):
             continue
-        if any(token in header for token in ("HINGE", "STRIKER", "DYNA", "BOLT", "PLATE")):
+        if sheet1_qty_column_is_hardware(ws, header_row, col_idx):
             continue
         return col_idx
     return None
@@ -1292,6 +1317,8 @@ def sheet1_hinge_qty_column(ws: Any, header_row: int) -> int | None:
         header = sheet1_header_text(ws, header_row, col_idx)
         if "HINGE" in header and "QTY" in header:
             return col_idx
+        if re.search(r"\bQTY\b", header) and sheet1_qty_column_is_hardware(ws, header_row, col_idx):
+            return col_idx
     return None
 
 
@@ -1306,11 +1333,26 @@ def row_looks_profileless_table_header(ws: Any, row_idx: int) -> bool:
     return "PROFILE" not in line and any(token in line for token in ("WALL", "FRAME", "CAVITY", "HINGE"))
 
 
+def row_is_profileless_table_header(ws: Any, row_idx: int) -> bool:
+    first = clean_text(ws.cell(row_idx, 1).value).lower()
+    second = clean_text(ws.cell(row_idx, 2).value).upper()
+    if first != "door #" or second != "TYPE":
+        return False
+    line = " ".join(clean_text(ws.cell(row_idx, col).value) for col in range(1, ws.max_column + 1)).upper()
+    return "PROFILE" not in line
+
+
 def find_sheet1_profileless_table_headers(ws: Any) -> list[tuple[int, int]]:
     headers: list[tuple[int, int]] = []
     for row_idx in range(1, min(ws.max_row, 180) + 1):
         if row_looks_profileless_table_header(ws, row_idx):
-            headers.append((row_idx + 1, 2))
+            candidate = (row_idx + 1, 2)
+            if candidate not in headers:
+                headers.append(candidate)
+        elif row_is_profileless_table_header(ws, row_idx):
+            candidate = (row_idx, 2)
+            if candidate not in headers:
+                headers.append(candidate)
     return headers
 
 
@@ -1321,12 +1363,20 @@ def sheet1_line_hardware_totals(
     product_qty: float,
     *,
     include_hardware: bool = True,
+    profile_col: int | None = None,
+    hinge_qty_bucket: str = "w",
 ) -> tuple[float, float]:
     if not include_hardware:
         return 0.0, 0.0
 
     part_cols = sheet1_numeric_part_columns(ws, header_row)
     striker_cols = sheet1_striker_columns(ws, header_row)
+    for col_idx in range(1, ws.max_column + 1):
+        if profile_col is not None and col_idx == profile_col:
+            continue
+        header = sheet1_header_text(ws, header_row, col_idx)
+        if header == "TYPE" and col_idx > (profile_col or 0):
+            striker_cols.append(col_idx)
     sill_cols = sheet1_sill_columns(ws, header_row)
     w_part_cols = sheet1_w_part_columns(ws, header_row)
     hinge_qty_col = sheet1_hinge_qty_column(ws, header_row)
@@ -1338,7 +1388,11 @@ def sheet1_line_hardware_totals(
     hinge_qty = number_or_none(ws.cell(row_idx, hinge_qty_col).value) if hinge_qty_col else 0
 
     v_total = product_qty * (part_qty + striker_qty + sill_qty)
-    w_total = product_qty * (float(hinge_qty or 0) + w_extra_qty)
+    w_total = product_qty * w_extra_qty
+    if hinge_qty_bucket == "v":
+        v_total += product_qty * float(hinge_qty or 0)
+    else:
+        w_total += product_qty * float(hinge_qty or 0)
     return v_total, w_total
 
 
@@ -1366,7 +1420,8 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
     row.values[9] = join_materials(materials)
 
     headers = find_sheet1_profile_headers(ws)
-    if not headers:
+    profileless_headers = find_sheet1_profileless_table_headers(ws)
+    if not headers and not profileless_headers:
         row.add_manual_check("Sheet1 profile header not found")
         return
 
@@ -1379,7 +1434,7 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
 
     for header_index, (header_row, profile_col) in enumerate(headers):
         next_header_row = headers[header_index + 1][0] if header_index + 1 < len(headers) else ws.max_row + 1
-        product_qty_col = sheet1_product_qty_column(ws, header_row)
+        product_qty_col = sheet1_product_qty_column(ws, header_row, profile_col)
         is_cavity_table = sheet1_table_is_cavity(ws, header_row)
         table_has_flat_sheet = table_contains_text(ws, header_row + 1, next_header_row, "FLAT SHEET")
 
@@ -1424,15 +1479,29 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
                 mitre_total += product_qty * (3 if is_double else 2)
             elif goods in {"MODERN", "DELUXE", "COMMERCIAL", "KD"}:
                 mitre_total += product_qty
+                if goods == "COMMERCIAL" and is_double:
+                    mitre_total += 1
 
-            line_v, line_w = sheet1_line_hardware_totals(ws, idx, header_row, product_qty)
+            line_v, line_w = sheet1_line_hardware_totals(
+                ws,
+                idx,
+                header_row,
+                product_qty,
+                profile_col=profile_col,
+                hinge_qty_bucket="v" if ws.title == "Sheet1" else "w",
+            )
             v_total += line_v
             w_total += line_w
+            if ws.title == "Sheet1" and any(
+                "HOLES" in sheet1_header_text(ws, header_row, col_idx) and has_value(ws.cell(idx, col_idx).value)
+                for col_idx in range(1, ws.max_column + 1)
+            ):
+                row.parts_extra += product_qty
             if "EVOKE KNOCKDOWN" in clean_text(profile).upper():
                 x_total += line_v
 
-    for header_row, profile_col in find_sheet1_profileless_table_headers(ws):
-        product_qty_col = sheet1_product_qty_column(ws, header_row)
+    for header_row, profile_col in profileless_headers:
+        product_qty_col = sheet1_product_qty_column(ws, header_row, profile_col)
         is_cavity_table = sheet1_table_is_cavity(ws, header_row)
         table_has_flat_sheet = table_contains_text(ws, header_row + 1, ws.max_row + 1, "FLAT SHEET")
 
@@ -1452,6 +1521,8 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
             context = row_context(ws, idx)
             goods = classify_goods_with_context(profile, context, row)
             goods = goods or door_skin_capping_only_goods(row, context, table_has_flat_sheet)
+            if ws.title == "Main Sheet" and not is_cavity_table:
+                goods = "COMMERCIAL"
             if is_cavity_table and goods in {None, "MODERN", "DELUXE"}:
                 goods = "CS"
             if is_cavity_table:
@@ -1469,6 +1540,8 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
                 mitre_total += product_qty * (3 if is_double else 2)
             elif goods in {"MODERN", "DELUXE", "COMMERCIAL", "KD"}:
                 mitre_total += product_qty
+                if goods == "COMMERCIAL" and is_double:
+                    mitre_total += 1
 
             line_v, line_w = sheet1_line_hardware_totals(
                 ws,
@@ -1476,9 +1549,12 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
                 header_row,
                 product_qty,
                 include_hardware=not is_cavity_table,
+                profile_col=profile_col,
             )
             v_total += line_v
             w_total += line_w
+            if ws.title == "Main Sheet" and goods == "COMMERCIAL" and line_w:
+                row.parts_w_multiplier = 1.0
 
     if infer_manual:
         write_over_size(row, worksheet_over_size_marker(ws), profile_tables_over_size_qty(ws))
@@ -1539,8 +1615,8 @@ def compute_parts(row: ExtractedRow) -> None:
     v = number_or_none(row.values[21]) or 0
     w = number_or_none(row.values[22]) or 0
     x = number_or_none(row.values[23]) or 0
-    if v or w or x:
-        value = float(v) + float(w) * 1.43 + float(x) * 0.43
+    if v or w or x or row.parts_extra:
+        value = float(v) + float(w) * row.parts_w_multiplier + float(x) * 0.43 + row.parts_extra
         row.values[20] = excel_display_int(value)
 
 
