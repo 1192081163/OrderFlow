@@ -281,6 +281,10 @@ def clean_text(value: Any) -> str:
     return text.strip()
 
 
+def row_is_hidden(ws: Any, row_idx: int) -> bool:
+    return bool(ws.row_dimensions[row_idx].hidden)
+
+
 def rule_key(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip().lower()
 
@@ -357,6 +361,8 @@ def normalize_po_number(value: Any) -> str | None:
 
 def sheet_has_door_skin_profile(ws: Any) -> bool:
     for row_idx in range(1, min(ws.max_row, 180) + 1):
+        if row_is_hidden(ws, row_idx):
+            continue
         for col_idx in range(1, ws.max_column + 1):
             text = clean_text(ws.cell(row_idx, col_idx).value).upper()
             if "SKIN" in text:
@@ -413,6 +419,8 @@ def over_size_marker_from_text(value: Any) -> str | None:
 def worksheet_over_size_marker(ws: Any) -> str | None:
     markers: list[str] = []
     for row_idx in range(1, ws.max_row + 1):
+        if row_is_hidden(ws, row_idx):
+            continue
         line = " ".join(clean_text(ws.cell(row_idx, col).value) for col in range(1, min(ws.max_column, 24) + 1))
         marker = over_size_marker_from_text(line)
         if marker:
@@ -478,6 +486,8 @@ def row_looks_cavity_table_header(ws: Any, row_idx: int) -> bool:
 def cavity_without_profile_over_size_qty(ws: Any) -> float:
     qty_total = 0.0
     for header_row in range(1, min(ws.max_row, 180) + 1):
+        if row_is_hidden(ws, header_row):
+            continue
         if not row_looks_cavity_table_header(ws, header_row):
             continue
         header_context = (
@@ -498,6 +508,8 @@ def cavity_without_profile_over_size_qty(ws: Any) -> float:
             ).upper()
         ]
         for row_idx in range(header_row + 2, ws.max_row + 1):
+            if row_is_hidden(ws, row_idx):
+                continue
             first = clean_text(ws.cell(row_idx, 1).value)
             if not first or first.upper().startswith(("DOOR", "MATERIAL")):
                 break
@@ -515,6 +527,8 @@ def profile_tables_over_size_qty(ws: Any) -> float:
         product_qty_col = sheet1_product_qty_column(ws, header_row, profile_col)
         width_cols = sheet1_width_columns(ws, header_row)
         for idx in range(header_row + 1, next_header_row):
+            if row_is_hidden(ws, idx):
+                continue
             if row_looks_cavity_table_header(ws, idx):
                 break
             profile = ws.cell(idx, profile_col).value
@@ -540,10 +554,13 @@ def profile_tables_over_size_qty(ws: Any) -> float:
 def main_width_columns(ws: Any) -> list[int]:
     columns: list[int] = []
     for row_idx in range(1, min(ws.max_row, 40) + 1):
+        if row_is_hidden(ws, row_idx):
+            continue
         for col_idx in range(1, ws.max_column + 1):
             context = " ".join(
                 clean_text(ws.cell(idx, col_idx).value)
                 for idx in range(max(1, row_idx - 1), min(ws.max_row, row_idx + 1) + 1)
+                if not row_is_hidden(ws, idx)
             ).upper()
             if "WIDTH" in context and col_idx not in columns:
                 columns.append(col_idx)
@@ -853,6 +870,8 @@ def write_goods(row: ExtractedRow, goods_totals: dict[str, float]) -> None:
 def worksheet_rows(ws: Any) -> list[int]:
     rows: list[int] = []
     for idx in range(10, ws.max_row + 1):
+        if row_is_hidden(ws, idx):
+            continue
         qty = number_or_none(ws[f"C{idx}"].value)
         profile = clean_text(ws[f"D{idx}"].value)
         material = clean_text(ws[f"A{idx}"].value)
@@ -871,6 +890,8 @@ def worksheet_has_standard_detail_header(ws: Any) -> bool:
 
 def worksheet_row_is_cavity(ws: Any, row_idx: int) -> bool:
     for idx in range(row_idx, 8, -1):
+        if row_is_hidden(ws, idx):
+            continue
         first = clean_text(ws[f"A{idx}"].value).upper()
         line = " ".join(clean_text(ws.cell(idx, col).value) for col in range(1, min(ws.max_column, 14) + 1)).upper()
         if idx != row_idx and first == "MATERIAL":
@@ -1017,6 +1038,8 @@ def extract_nonstandard_worksheet_metadata(path: Path, row: ExtractedRow, wb: An
 def iter_main_detail_rows(ws: Any) -> list[int]:
     rows: list[int] = []
     for idx in range(1, ws.max_row + 1):
+        if row_is_hidden(ws, idx):
+            continue
         a = ws[f"A{idx}"].value
         b = ws[f"B{idx}"].value
         c = ws[f"C{idx}"].value
@@ -1057,6 +1080,8 @@ def extract_main_workbook(path: Path, row: ExtractedRow, wb: Any, infer_manual: 
 
     materials: list[str] = []
     for idx in range(1, ws.max_row + 1):
+        if row_is_hidden(ws, idx):
+            continue
         if clean_text(ws[f"A{idx}"].value).lower().startswith("material"):
             code = material_code(f"{clean_text(ws[f'B{idx}'].value)} {clean_text(ws[f'C{idx}'].value)}")
             if code:
@@ -1112,6 +1137,8 @@ def extract_main_workbook(path: Path, row: ExtractedRow, wb: Any, infer_manual: 
     if infer_manual:
         write_over_size(row, worksheet_over_size_marker(ws), main_fallback_over_size_qty(ws))
         for idx in range(1, ws.max_row + 1):
+            if row_is_hidden(ws, idx):
+                continue
             line = " ".join(clean_text(ws.cell(idx, col).value) for col in range(1, ws.max_column + 1))
             if "STILLAGE" in line.upper():
                 row.notes.append(f"row {idx}: {line}")
@@ -1185,6 +1212,8 @@ def extract_sheet1_address(ws: Any) -> tuple[str | None, str | None]:
 def sheet1_material(ws: Any) -> str | None:
     values: list[str] = []
     for row_idx in range(1, min(ws.max_row, 180) + 1):
+        if row_is_hidden(ws, row_idx):
+            continue
         for col_idx in range(1, ws.max_column + 1):
             if clean_text(ws.cell(row_idx, col_idx).value).lower().rstrip(":") != "material":
                 continue
@@ -1202,6 +1231,8 @@ def sheet1_material(ws: Any) -> str | None:
                     values.append(code)
     if not values:
         for row_idx in range(1, min(ws.max_row, 15) + 1):
+            if row_is_hidden(ws, row_idx):
+                continue
             for col_idx in range(1, ws.max_column + 1):
                 code = material_code(ws.cell(row_idx, col_idx).value)
                 if code:
@@ -1217,6 +1248,8 @@ def find_sheet1_profile_header(ws: Any) -> tuple[int, int] | None:
 def find_sheet1_profile_headers(ws: Any) -> list[tuple[int, int]]:
     headers: list[tuple[int, int]] = []
     for row_idx in range(1, min(ws.max_row, 100) + 1):
+        if row_is_hidden(ws, row_idx):
+            continue
         for col_idx in range(1, ws.max_column + 1):
             if clean_text(ws.cell(row_idx, col_idx).value).lower() == "profile":
                 headers.append((row_idx, col_idx))
@@ -1226,6 +1259,8 @@ def find_sheet1_profile_headers(ws: Any) -> list[tuple[int, int]]:
 def sheet1_header_text(ws: Any, header_row: int, col_idx: int) -> str:
     parts = []
     for row_idx in range(max(1, header_row - 2), header_row + 1):
+        if row_is_hidden(ws, row_idx):
+            continue
         text = clean_text(ws.cell(row_idx, col_idx).value)
         if text:
             parts.append(text)
@@ -1268,6 +1303,8 @@ def sheet1_product_qty(ws: Any, row_idx: int, profile_col: int, quantity_col: in
 
 def sheet1_table_is_cavity(ws: Any, header_row: int) -> bool:
     for row_idx in range(max(1, header_row - 2), header_row + 1):
+        if row_is_hidden(ws, row_idx):
+            continue
         line = " ".join(clean_text(ws.cell(row_idx, col).value) for col in range(1, ws.max_column + 1))
         if "CAVITY" in line.upper() or "SLIDER" in line.upper():
             return True
@@ -1323,7 +1360,7 @@ def sheet1_hinge_qty_column(ws: Any, header_row: int) -> int | None:
 
 
 def row_looks_profileless_table_header(ws: Any, row_idx: int) -> bool:
-    if row_idx >= ws.max_row:
+    if row_idx >= ws.max_row or row_is_hidden(ws, row_idx) or row_is_hidden(ws, row_idx + 1):
         return False
     next_first = clean_text(ws.cell(row_idx + 1, 1).value).lower()
     next_second = clean_text(ws.cell(row_idx + 1, 2).value).upper()
@@ -1334,6 +1371,8 @@ def row_looks_profileless_table_header(ws: Any, row_idx: int) -> bool:
 
 
 def row_is_profileless_table_header(ws: Any, row_idx: int) -> bool:
+    if row_is_hidden(ws, row_idx):
+        return False
     first = clean_text(ws.cell(row_idx, 1).value).lower()
     second = clean_text(ws.cell(row_idx, 2).value).upper()
     if first != "door #" or second != "TYPE":
@@ -1345,6 +1384,8 @@ def row_is_profileless_table_header(ws: Any, row_idx: int) -> bool:
 def find_sheet1_profileless_table_headers(ws: Any) -> list[tuple[int, int]]:
     headers: list[tuple[int, int]] = []
     for row_idx in range(1, min(ws.max_row, 180) + 1):
+        if row_is_hidden(ws, row_idx):
+            continue
         if row_looks_profileless_table_header(ws, row_idx):
             candidate = (row_idx + 1, 2)
             if candidate not in headers:
@@ -1399,6 +1440,8 @@ def sheet1_line_hardware_totals(
 def table_contains_text(ws: Any, start_row: int, end_row: int, token: str) -> bool:
     token_upper = token.upper()
     for row_idx in range(start_row, min(end_row, ws.max_row + 1)):
+        if row_is_hidden(ws, row_idx):
+            continue
         line = " ".join(clean_text(ws.cell(row_idx, col).value) for col in range(1, ws.max_column + 1)).upper()
         if token_upper in line:
             return True
@@ -1439,6 +1482,8 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
         table_has_flat_sheet = table_contains_text(ws, header_row + 1, next_header_row, "FLAT SHEET")
 
         for idx in range(header_row + 1, next_header_row):
+            if row_is_hidden(ws, idx):
+                continue
             if row_looks_profileless_table_header(ws, idx):
                 break
             profile = ws.cell(idx, profile_col).value
@@ -1506,6 +1551,8 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
         table_has_flat_sheet = table_contains_text(ws, header_row + 1, ws.max_row + 1, "FLAT SHEET")
 
         for idx in range(header_row + 1, ws.max_row + 1):
+            if row_is_hidden(ws, idx):
+                continue
             if row_looks_profileless_table_header(ws, idx):
                 break
             profile = ws.cell(idx, profile_col).value
@@ -1559,6 +1606,8 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
     if infer_manual:
         write_over_size(row, worksheet_over_size_marker(ws), profile_tables_over_size_qty(ws))
         for idx in range(1, ws.max_row + 1):
+            if row_is_hidden(ws, idx):
+                continue
             line = " ".join(clean_text(ws.cell(idx, col).value) for col in range(1, ws.max_column + 1))
             if "STILLAGE" in line.upper() or "PALLET" in line.upper():
                 row.notes.append(f"row {idx}: {line}")

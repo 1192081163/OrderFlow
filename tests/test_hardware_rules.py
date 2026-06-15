@@ -151,6 +151,40 @@ def test_standard_worksheet_screw_fixed_prep_uses_w_bucket_and_skips_other_rows(
     assert row.values[19:24] == [2, 9, 3, 6, None]
 
 
+def test_standard_worksheet_hidden_detail_rows_are_ignored(tmp_path: Path) -> None:
+    wb = worksheet_book()
+    ws = wb["Worksheet"]
+    values = [
+        "1.05mm Zincanneal",
+        "",
+        1,
+        "Modern",
+        "95",
+        2060,
+        823,
+        "RIGHT",
+        "2",
+        "WELDED",
+        "S1",
+        "1000",
+        "NO",
+        "NO",
+        "NO",
+        "Modern",
+        "95",
+        "S1",
+    ]
+    for row_idx in (11, 12):
+        for col, value in enumerate(values, start=1):
+            ws.cell(row_idx, col).value = value
+    ws.row_dimensions[12].hidden = True
+
+    row = extract.extract_workbook(save_workbook(wb, tmp_path / "hidden-worksheet.xlsx"), infer_manual=True)
+
+    assert row.values[10:12] == [1, "MODERN"]
+    assert row.values[19:24] == [1, 3, 3, None, None]
+
+
 def sheet1_profile_book() -> Workbook:
     wb = Workbook()
     ws = wb.active
@@ -170,6 +204,21 @@ def test_sheet1_hinges_quantity_goes_to_v_bucket(tmp_path: Path) -> None:
         ws.cell(13, col).value = value
 
     row = extract.extract_workbook(save_workbook(wb, tmp_path / "sheet1.xlsx"), infer_manual=True)
+
+    assert row.values[10:12] == [1, "SPLIT"]
+    assert row.values[19:24] == [2, 5, 4, None, None]
+
+
+def test_sheet1_profile_hidden_detail_rows_are_ignored(tmp_path: Path) -> None:
+    wb = sheet1_profile_book()
+    ws = wb["Sheet1"]
+    values = [1, "Split 180B/O (35 Door)", 2060, 923, "RIGHT", 3, "100X75X1.6", "S1", 1000, "12 + 6"]
+    for row_idx in (13, 14):
+        for col, value in enumerate(values, start=1):
+            ws.cell(row_idx, col).value = value
+    ws.row_dimensions[14].hidden = True
+
+    row = extract.extract_workbook(save_workbook(wb, tmp_path / "hidden-sheet1.xlsx"), infer_manual=True)
 
     assert row.values[10:12] == [1, "SPLIT"]
     assert row.values[19:24] == [2, 5, 4, None, None]
@@ -230,6 +279,37 @@ def test_main_sheet_profileless_table_extracts_commercial_hardware(tmp_path: Pat
         ws.cell(13, col).value = value
 
     row = extract.extract_workbook(save_workbook(wb, tmp_path / "main-profileless.xlsx"), infer_manual=True)
+
+    assert row.values[10:12] == [1, "COMMERCIAL"]
+    assert row.values[19:24] == [1, 5, 1, 4, None]
+
+
+def test_main_sheet_profileless_hidden_detail_rows_are_ignored(tmp_path: Path) -> None:
+    wb = main_sheet_book()
+    ws = wb["Main Sheet"]
+    headers = ["Door #", "TYPE", "THICKNESS", "HEIGHT", "WIDTH", "HAND", "QTY", "TO SUIT", "TYPE", "HEIGHT", "HOLES", "BRACKETS"]
+    for col, value in enumerate(headers, start=1):
+        ws.cell(12, col).value = value
+    values = [
+        "MAIL ROOM",
+        "SPLIT 85-125B/O ",
+        "40mm",
+        2060,
+        923,
+        "RIGHT",
+        4,
+        "100X75X2.5",
+        "MORTICE LOCK (S1)",
+        1032,
+        "12 + 6",
+        "NOT REQUIRED",
+    ]
+    for row_idx in (13, 14):
+        for col, value in enumerate(values, start=1):
+            ws.cell(row_idx, col).value = value
+    ws.row_dimensions[14].hidden = True
+
+    row = extract.extract_workbook(save_workbook(wb, tmp_path / "hidden-main-profileless.xlsx"), infer_manual=True)
 
     assert row.values[10:12] == [1, "COMMERCIAL"]
     assert row.values[19:24] == [1, 5, 1, 4, None]
