@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal, Slot
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -26,6 +28,16 @@ from PySide6.QtWidgets import (
 from branding import APP_DISPLAY_NAME
 from build_info import APP_BUILD_COMMIT, APP_RELEASE_TAG, APP_VERSION
 from desktop_runner import ExtractionResult, NoInputFilesError, run_extraction
+from email_source import (
+    DEFAULT_IMAP_PORT,
+    DEFAULT_IMAP_SERVER,
+    EmailSettings,
+    ImapConfig,
+    default_email_download_root,
+    fetch_email_order_files,
+    load_email_settings,
+    save_email_settings,
+)
 from updater import (
     UpdateCheckInput,
     UpdateCheckResult,
@@ -42,24 +54,24 @@ class DropZone(QFrame):
         super().__init__()
         self.setObjectName("dropZone")
         self.setAcceptDrops(True)
-        self.setMinimumHeight(180)
+        self.setMinimumHeight(84)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(8)
+        layout.setContentsMargins(18, 12, 18, 12)
+        layout.setSpacing(4)
 
-        title = QLabel("拖入订单文件夹或 Excel 文件")
-        title.setObjectName("dropTitle")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label = QLabel("也可以拖入 Excel 或文件夹")
+        self.title_label.setObjectName("dropTitle")
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        subtitle = QLabel("支持文件夹、多个 .xlsx/.xlsm 文件；拖入后自动开始提取")
-        subtitle.setObjectName("dropSubtitle")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.subtitle_label = QLabel("支持 .xlsx/.xlsm 和文件夹，拖入后自动开始提取")
+        self.subtitle_label.setObjectName("dropSubtitle")
+        self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         layout.addStretch(1)
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.subtitle_label)
         layout.addStretch(1)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
@@ -131,6 +143,48 @@ class ExtractionWorker(QThread):
             self.logMessage.emit(f"[{index}/{total}] 失败 {path.name}")
 
 
+class EmailExtractionWorker(QThread):
+    progressChanged = Signal(int, int, str, str)
+    logMessage = Signal(str)
+    extractionFinished = Signal(object)
+    extractionFailed = Signal(str)
+
+    def __init__(self, config: ImapConfig, download_dir: Path, infer_manual: bool) -> None:
+        super().__init__()
+        self.config = config
+        self.download_dir = download_dir
+        self.infer_manual = infer_manual
+
+    def run(self) -> None:
+        try:
+            self.logMessage.emit("正在连接企业微信邮箱")
+            fetch_result = fetch_email_order_files(self.config, self.download_dir)
+            self.logMessage.emit(
+                f"已扫描 {fetch_result.scanned_messages} 封邮件，找到 {fetch_result.attachment_count} 个 Excel 附件"
+            )
+            result = run_extraction(
+                [str(path) for path in fetch_result.files],
+                recursive=False,
+                infer_manual=self.infer_manual,
+                progress=self._report_progress,
+            )
+        except NoInputFilesError as exc:
+            self.extractionFailed.emit(str(exc))
+        except Exception as exc:
+            self.extractionFailed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.extractionFinished.emit(result)
+
+    def _report_progress(self, index: int, total: int, path: Path, status: str) -> None:
+        self.progressChanged.emit(index, total, path.name, status)
+        if status == "running":
+            self.logMessage.emit(f"[{index}/{total}] 正在处理 {path.name}")
+        elif status == "completed":
+            self.logMessage.emit(f"[{index}/{total}] 完成 {path.name}")
+        elif status == "failed":
+            self.logMessage.emit(f"[{index}/{total}] 失败 {path.name}")
+
+
 class UpdateCheckWorker(QThread):
     updateCheckFinished = Signal(object, bool)
 
@@ -164,10 +218,11 @@ class UpdateDownloadWorker(QThread):
 class OrderExtractionWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.worker: ExtractionWorker | None = None
+        self.worker: ExtractionWorker | EmailExtractionWorker | None = None
         self.update_worker: UpdateCheckWorker | None = None
         self.update_download_worker: UpdateDownloadWorker | None = None
         self.last_result: ExtractionResult | None = None
+        self.email_settings_expanded = True
 
         self.setWindowTitle(APP_DISPLAY_NAME)
         icon_path = resource_path("assets/app_icon.png")
@@ -187,7 +242,7 @@ class OrderExtractionWindow(QMainWindow):
         title_group.setSpacing(3)
         title = QLabel(APP_DISPLAY_NAME)
         title.setObjectName("appTitle")
-        self.status_label = QLabel("等待拖入订单文件夹或 Excel 文件")
+        self.status_label = QLabel("等待从邮箱提取订单")
         self.status_label.setObjectName("statusText")
         title_group.addWidget(title)
         title_group.addWidget(self.status_label)
@@ -201,17 +256,62 @@ class OrderExtractionWindow(QMainWindow):
         header.addWidget(self.check_update_button)
         layout.addLayout(header)
 
+        self.email_settings_panel = QFrame()
+        self.email_settings_panel.setObjectName("panel")
+        email_settings_layout = QGridLayout(self.email_settings_panel)
+        email_settings_layout.setContentsMargins(16, 14, 16, 14)
+        email_settings_layout.setHorizontalSpacing(10)
+        email_settings_layout.setVerticalSpacing(10)
+        self.email_input = QLineEdit()
+        self.email_input.setPlaceholderText("企业微信邮箱")
+        self.auth_code_input = QLineEdit()
+        self.auth_code_input.setPlaceholderText("邮箱授权码")
+        self.auth_code_input.setEchoMode(QLineEdit.Password)
+        self.save_email_settings_button = QPushButton("保存邮箱设置")
+        self.save_email_settings_button.clicked.connect(self.finish_email_settings)
+        email_settings_layout.addWidget(QLabel("邮箱"), 0, 0)
+        email_settings_layout.addWidget(self.email_input, 0, 1)
+        email_settings_layout.addWidget(QLabel("授权码"), 1, 0)
+        email_settings_layout.addWidget(self.auth_code_input, 1, 1)
+        email_settings_layout.addWidget(self.save_email_settings_button, 1, 2)
+        layout.addWidget(self.email_settings_panel)
+
+        self.email_summary_panel = QFrame()
+        self.email_summary_panel.setObjectName("panel")
+        email_summary_layout = QHBoxLayout(self.email_summary_panel)
+        email_summary_layout.setContentsMargins(16, 10, 16, 10)
+        self.email_summary_label = QLabel("")
+        self.fetch_email_button = QPushButton("从邮箱提取订单")
+        self.fetch_email_button.setObjectName("primaryActionButton")
+        self.fetch_email_button.setMinimumHeight(44)
+        self.edit_email_settings_button = QPushButton("修改邮箱设置")
+        self.edit_email_settings_button.setObjectName("secondaryActionButton")
+        self.fetch_email_button.clicked.connect(self.start_email_extraction)
+        self.edit_email_settings_button.clicked.connect(self.expand_email_settings)
+        email_summary_layout.addWidget(self.email_summary_label)
+        email_summary_layout.addStretch(1)
+        email_summary_layout.addWidget(self.fetch_email_button)
+        email_summary_layout.addWidget(self.edit_email_settings_button)
+        layout.addWidget(self.email_summary_panel)
+
         self.drop_zone = DropZone()
         self.drop_zone.pathsDropped.connect(self.start_extraction)
         layout.addWidget(self.drop_zone)
 
-        options_row = QHBoxLayout()
+        self.advanced_settings_panel = QFrame()
+        self.advanced_settings_panel.setObjectName("settingsPanel")
+        options_row = QHBoxLayout(self.advanced_settings_panel)
+        options_row.setContentsMargins(12, 8, 12, 8)
+        options_row.setSpacing(10)
         self.recursive_checkbox = QCheckBox("递归扫描子文件夹")
         self.infer_manual_checkbox = QCheckBox("自动补全可推断字段")
         self.infer_manual_checkbox.setChecked(True)
         self.select_folder_button = QPushButton("选择文件夹")
-        self.select_files_button = QPushButton("选择 Excel 文件")
+        self.select_folder_button.setObjectName("secondaryActionButton")
+        self.select_files_button = QPushButton("选择 Excel")
+        self.select_files_button.setObjectName("secondaryActionButton")
         self.reset_button = QPushButton("清空")
+        self.reset_button.setObjectName("secondaryActionButton")
         self.select_folder_button.clicked.connect(self.choose_folder)
         self.select_files_button.clicked.connect(self.choose_files)
         self.reset_button.clicked.connect(self.reset_view)
@@ -221,7 +321,7 @@ class OrderExtractionWindow(QMainWindow):
         options_row.addWidget(self.select_folder_button)
         options_row.addWidget(self.select_files_button)
         options_row.addWidget(self.reset_button)
-        layout.addLayout(options_row)
+        layout.addWidget(self.advanced_settings_panel)
 
         progress_panel = QFrame()
         progress_panel.setObjectName("panel")
@@ -259,6 +359,8 @@ class OrderExtractionWindow(QMainWindow):
         layout.addLayout(actions)
 
         self.apply_styles()
+        self.load_saved_email_settings()
+        self.update_email_settings_visibility()
         QTimer.singleShot(1500, self.check_for_updates_auto)
 
     def apply_styles(self) -> None:
@@ -289,7 +391,7 @@ class OrderExtractionWindow(QMainWindow):
             QLabel#dropTitle {
                 background: transparent;
                 color: #17212b;
-                font-size: 22px;
+                font-size: 15px;
                 font-weight: 700;
             }
             QLabel#dropSubtitle {
@@ -297,6 +399,11 @@ class OrderExtractionWindow(QMainWindow):
                 font-size: 13px;
             }
             QFrame#panel, QTextEdit#logView {
+                background: #ffffff;
+                border: 1px solid #d7dee5;
+                border-radius: 8px;
+            }
+            QFrame#settingsPanel {
                 background: #ffffff;
                 border: 1px solid #d7dee5;
                 border-radius: 8px;
@@ -314,6 +421,20 @@ class OrderExtractionWindow(QMainWindow):
             }
             QPushButton:hover {
                 background: #eef3f6;
+            }
+            QPushButton#primaryActionButton {
+                background: #16815f;
+                border-color: #126b50;
+                color: #ffffff;
+                font-size: 16px;
+                font-weight: 700;
+                padding: 10px 18px;
+            }
+            QPushButton#primaryActionButton:hover {
+                background: #126f52;
+            }
+            QPushButton#secondaryActionButton {
+                padding: 7px 11px;
             }
             QPushButton:disabled {
                 color: #94a0ab;
@@ -338,6 +459,60 @@ class OrderExtractionWindow(QMainWindow):
 
     def current_update_input(self) -> UpdateCheckInput:
         return UpdateCheckInput(current_version=APP_VERSION, current_commit=APP_BUILD_COMMIT)
+
+    def required_email_fields_present(self) -> bool:
+        return bool(self.email_input.text().strip() and self.auth_code_input.text())
+
+    def load_saved_email_settings(self) -> None:
+        settings = load_email_settings()
+        self.email_input.setText(settings.email)
+        self.auth_code_input.setText(settings.auth_code)
+
+    def save_current_email_settings(self) -> None:
+        save_email_settings(
+            EmailSettings(
+                email=self.email_input.text().strip(),
+                auth_code=self.auth_code_input.text(),
+            )
+        )
+
+    def update_email_settings_visibility(self) -> None:
+        if self.required_email_fields_present():
+            self.collapse_email_settings()
+        else:
+            self.expand_email_settings()
+
+    @Slot()
+    def finish_email_settings(self) -> None:
+        if not self.required_email_fields_present():
+            QMessageBox.warning(self, "缺少邮箱信息", "请填写企业微信邮箱和授权码。")
+            return
+        self.save_current_email_settings()
+        self.collapse_email_settings()
+
+    @Slot()
+    def expand_email_settings(self) -> None:
+        self.email_settings_expanded = True
+        self.email_summary_panel.hide()
+        self.email_settings_panel.show()
+
+    def collapse_email_settings(self) -> None:
+        self.email_settings_expanded = False
+        self.email_summary_label.setText(f"邮箱：{self.email_input.text().strip()}")
+        self.email_settings_panel.hide()
+        self.email_summary_panel.show()
+
+    def build_email_config(self) -> ImapConfig | None:
+        if not self.required_email_fields_present():
+            QMessageBox.warning(self, "缺少邮箱信息", "请填写企业微信邮箱和授权码。")
+            self.expand_email_settings()
+            return None
+        return ImapConfig(
+            server=DEFAULT_IMAP_SERVER,
+            port=DEFAULT_IMAP_PORT,
+            email=self.email_input.text().strip(),
+            auth_code=self.auth_code_input.text(),
+        )
 
     @Slot()
     def check_for_updates_manual(self) -> None:
@@ -457,6 +632,41 @@ class OrderExtractionWindow(QMainWindow):
         if files:
             self.start_extraction(files)
 
+    @Slot()
+    def start_email_extraction(self) -> None:
+        if self.worker and self.worker.isRunning():
+            QMessageBox.information(self, "正在处理", "请等待当前提取完成。")
+            return
+
+        config = self.build_email_config()
+        if config is None:
+            return
+
+        self.save_current_email_settings()
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        download_dir = default_email_download_root() / timestamp
+        self.last_result = None
+        self.open_workbook_button.setEnabled(False)
+        self.open_folder_button.setEnabled(False)
+        self.progress_bar.setValue(0)
+        self.current_file_label.setText("当前文件：准备中")
+        self.count_label.setText("文件：0 | 成功：0 | 失败：0 | 跳过：0")
+        self.log_view.clear()
+        self.append_log("开始从邮箱提取订单")
+        self.set_busy(True)
+
+        self.worker = EmailExtractionWorker(
+            config=config,
+            download_dir=download_dir,
+            infer_manual=self.infer_manual_checkbox.isChecked(),
+        )
+        self.worker.progressChanged.connect(self.on_progress_changed)
+        self.worker.logMessage.connect(self.append_log)
+        self.worker.extractionFinished.connect(self.on_extraction_finished)
+        self.worker.extractionFailed.connect(self.on_extraction_failed)
+        self.worker.finished.connect(lambda: self.set_busy(False))
+        self.worker.start()
+
     @Slot(list)
     def start_extraction(self, paths: list[str]) -> None:
         if self.worker and self.worker.isRunning():
@@ -534,6 +744,11 @@ class OrderExtractionWindow(QMainWindow):
         self.infer_manual_checkbox.setEnabled(not busy)
         self.select_folder_button.setEnabled(not busy)
         self.select_files_button.setEnabled(not busy)
+        self.fetch_email_button.setEnabled(not busy)
+        self.edit_email_settings_button.setEnabled(not busy)
+        self.save_email_settings_button.setEnabled(not busy)
+        self.email_input.setEnabled(not busy)
+        self.auth_code_input.setEnabled(not busy)
         self.reset_button.setEnabled(not busy)
         self.status_label.setText("正在提取订单" if busy else self.status_label.text())
 
@@ -546,7 +761,7 @@ class OrderExtractionWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.current_file_label.setText("当前文件：-")
         self.count_label.setText("文件：0 | 成功：0 | 失败：0 | 跳过：0")
-        self.status_label.setText("等待拖入订单文件夹或 Excel 文件")
+        self.status_label.setText("等待从邮箱提取订单")
         self.log_view.clear()
         self.open_workbook_button.setEnabled(False)
         self.open_folder_button.setEnabled(False)

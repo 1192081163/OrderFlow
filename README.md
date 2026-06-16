@@ -66,10 +66,19 @@ python3 -m pip install -r requirements-desktop.txt
 python3 desktop_app.py
 ```
 
+## 从企业微信邮箱提取
+
+1. 打开软件后填写企业微信邮箱和邮箱授权码。
+2. 保存后邮箱设置会自动收起。
+3. 点击 `从邮箱提取订单`，软件会读取收件箱里的 `.xlsx/.xlsm` 附件并生成订单整理结果。
+
+原来的拖入文件夹、选择 Excel 文件方式仍然可用。
+
 ## 文件说明
 
 - `desktop_app.py`: 桌面界面。
 - `desktop_runner.py`: 文件解析、输出路径和提取执行层。
+- `email_source.py`: 企业微信 IMAP 连接、邮件附件筛选和附件落盘。
 - `extract.py`: 订单提取核心逻辑。
 - `rules/`: 客户别名、工作日和忽略规则。
 - `tests/`: 仓库内可运行的回归测试。
