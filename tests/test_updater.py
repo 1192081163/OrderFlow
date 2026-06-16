@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import urllib.error
 
+import updater
 from updater import (
     UpdateCheckInput,
     WINDOWS_ASSET,
@@ -165,3 +166,107 @@ def test_read_json_url_uses_injected_opener() -> None:
     assert read_json_url("https://example.test/latest", timeout=2.5, opener=opener) == {
         "tag_name": "v1.0.0"
     }
+
+
+def test_download_update_asset_writes_package_to_target_dir(tmp_path) -> None:
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def read(self, size: int = -1) -> bytes:
+            if getattr(self, "_done", False):
+                return b""
+            self._done = True
+            return b"installer"
+
+    def opener(request, timeout: float):
+        assert request.full_url == "https://example.test/tool.exe"
+        assert timeout == 4.0
+        return Response()
+
+    assert hasattr(updater, "download_update_asset")
+
+    result = updater.download_update_asset(
+        "https://example.test/tool.exe",
+        "order-extraction-tool-windows.exe",
+        target_dir=tmp_path,
+        timeout=4.0,
+        opener=opener,
+    )
+
+    assert result.path == tmp_path / "order-extraction-tool-windows.exe"
+    assert result.path.read_bytes() == b"installer"
+    assert result.bytes_written == len(b"installer")
+
+
+def test_download_update_asset_replaces_existing_file_atomically(tmp_path) -> None:
+    existing = tmp_path / "order-extraction-tool-windows.exe"
+    existing.write_bytes(b"old")
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def read(self, size: int = -1) -> bytes:
+            return b"new-version" if not hasattr(self, "read_once") else b""
+
+    def opener(request, timeout: float):
+        response = Response()
+
+        def read_once(size: int = -1) -> bytes:
+            if getattr(response, "_done", False):
+                return b""
+            response._done = True
+            return b"new-version"
+
+        response.read = read_once
+        return response
+
+    assert hasattr(updater, "download_update_asset")
+
+    result = updater.download_update_asset(
+        "https://example.test/tool.exe",
+        "order-extraction-tool-windows.exe",
+        target_dir=tmp_path,
+        opener=opener,
+    )
+
+    assert result.path == existing
+    assert existing.read_bytes() == b"new-version"
+    assert not (tmp_path / "order-extraction-tool-windows.exe.download").exists()
+
+
+def test_download_update_asset_uses_url_filename_when_asset_name_missing(tmp_path) -> None:
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def read(self, size: int = -1) -> bytes:
+            if getattr(self, "_done", False):
+                return b""
+            self._done = True
+            return b"dmg"
+
+    def opener(request, timeout: float):
+        return Response()
+
+    assert hasattr(updater, "download_update_asset")
+
+    result = updater.download_update_asset(
+        "https://example.test/downloads/order-extraction-tool-macos.dmg?token=abc",
+        "",
+        target_dir=tmp_path,
+        opener=opener,
+    )
+
+    assert result.path == tmp_path / "order-extraction-tool-macos.dmg"
+    assert result.path.read_bytes() == b"dmg"

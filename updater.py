@@ -5,7 +5,9 @@ import platform
 import re
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import unquote, urlparse
 
 REPO_OWNER = "1192081163"
 REPO_NAME = "r004-order-extraction-tool"
@@ -48,6 +50,12 @@ class UpdateCheckResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class UpdateDownloadResult:
+    path: Path
+    bytes_written: int
+
+
 def _version_parts(version: str) -> tuple[int, ...]:
     cleaned = version.strip().lower()
     cleaned = cleaned[1:] if cleaned.startswith("v") else cleaned
@@ -87,6 +95,50 @@ def read_json_url(
     request = urllib.request.Request(url, headers={"User-Agent": "order-extraction-tool"})
     with opener(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def default_update_download_dir() -> Path:
+    return Path.home() / "Downloads" / "order-extraction-tool-updates"
+
+
+def update_asset_filename(download_url: str, asset_name: str) -> str:
+    candidate = Path(asset_name).name if asset_name else ""
+    if not candidate:
+        parsed = urlparse(download_url)
+        candidate = Path(unquote(parsed.path)).name
+    return candidate or "order-extraction-update"
+
+
+def download_update_asset(
+    download_url: str,
+    asset_name: str,
+    target_dir: Path | None = None,
+    timeout: float = 30.0,
+    opener: Callable[..., Any] = urllib.request.urlopen,
+    chunk_size: int = 1024 * 1024,
+) -> UpdateDownloadResult:
+    if not download_url:
+        raise ValueError("缺少更新下载链接")
+
+    download_dir = target_dir or default_update_download_dir()
+    download_dir.mkdir(parents=True, exist_ok=True)
+    filename = update_asset_filename(download_url, asset_name)
+    final_path = download_dir / filename
+    temp_path = download_dir / f"{filename}.download"
+
+    request = urllib.request.Request(download_url, headers={"User-Agent": "order-extraction-tool"})
+    bytes_written = 0
+    with opener(request, timeout=timeout) as response:
+        with temp_path.open("wb") as output:
+            while True:
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+                output.write(chunk)
+                bytes_written += len(chunk)
+
+    temp_path.replace(final_path)
+    return UpdateDownloadResult(path=final_path, bytes_written=bytes_written)
 
 
 def latest_tag_commit(release_tag: str, timeout: float = 6.0) -> str:

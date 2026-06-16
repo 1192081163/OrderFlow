@@ -25,7 +25,13 @@ from PySide6.QtWidgets import (
 
 from build_info import APP_BUILD_COMMIT, APP_RELEASE_TAG, APP_VERSION
 from desktop_runner import ExtractionResult, NoInputFilesError, run_extraction
-from updater import UpdateCheckInput, UpdateCheckResult, check_for_update
+from updater import (
+    UpdateCheckInput,
+    UpdateCheckResult,
+    UpdateDownloadResult,
+    check_for_update,
+    download_update_asset,
+)
 
 
 class DropZone(QFrame):
@@ -132,11 +138,29 @@ class UpdateCheckWorker(QThread):
         self.updateCheckFinished.emit(result, self.manual)
 
 
+class UpdateDownloadWorker(QThread):
+    updateDownloadFinished = Signal(object)
+    updateDownloadFailed = Signal(str)
+
+    def __init__(self, update: UpdateCheckResult) -> None:
+        super().__init__()
+        self.update = update
+
+    def run(self) -> None:
+        try:
+            result = download_update_asset(self.update.download_url, self.update.asset_name)
+        except Exception as exc:
+            self.updateDownloadFailed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.updateDownloadFinished.emit(result)
+
+
 class OrderExtractionWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.worker: ExtractionWorker | None = None
         self.update_worker: UpdateCheckWorker | None = None
+        self.update_download_worker: UpdateDownloadWorker | None = None
         self.last_result: ExtractionResult | None = None
 
         self.setWindowTitle("订单提取工具")
@@ -322,11 +346,19 @@ class OrderExtractionWindow(QMainWindow):
 
         if manual:
             self.append_log("正在检查更新")
+        self.check_update_button.setText("检查中...")
         self.check_update_button.setEnabled(False)
         self.update_worker = UpdateCheckWorker(self.current_update_input(), manual=manual)
         self.update_worker.updateCheckFinished.connect(self.on_update_check_finished)
-        self.update_worker.finished.connect(lambda: self.check_update_button.setEnabled(True))
+        self.update_worker.finished.connect(self.on_update_check_worker_finished)
         self.update_worker.start()
+
+    @Slot()
+    def on_update_check_worker_finished(self) -> None:
+        if self.update_download_worker is not None:
+            return
+        self.check_update_button.setText("检查更新")
+        self.check_update_button.setEnabled(True)
 
     @Slot(object, bool)
     def on_update_check_finished(self, result: UpdateCheckResult, manual: bool) -> None:
@@ -348,7 +380,7 @@ class OrderExtractionWindow(QMainWindow):
             f"发现新版本 {result.latest_version}\n"
             f"当前版本：{APP_RELEASE_TAG}\n"
             f"下载文件：{result.asset_name}\n\n"
-            "是否打开下载链接？"
+            "是否在软件内下载更新包？"
         )
         response = QMessageBox.question(
             self,
@@ -358,10 +390,46 @@ class OrderExtractionWindow(QMainWindow):
             QMessageBox.StandardButton.Yes,
         )
         if response == QMessageBox.StandardButton.Yes:
-            target_url = result.download_url or result.release_url
-            if target_url:
-                QDesktopServices.openUrl(QUrl(target_url))
+            self.start_update_download(result)
+        else:
+            self.append_log("已取消更新下载")
         self.append_log(f"发现新版本 {result.latest_version}")
+
+    def start_update_download(self, result: UpdateCheckResult) -> None:
+        if self.update_download_worker and self.update_download_worker.isRunning():
+            QMessageBox.information(self, "正在下载", "正在下载更新包，请稍后。")
+            return
+
+        self.status_label.setText("正在下载更新包")
+        self.append_log(f"正在下载更新包 {result.asset_name}")
+        self.check_update_button.setText("下载中...")
+        self.check_update_button.setEnabled(False)
+        self.update_download_worker = UpdateDownloadWorker(result)
+        self.update_download_worker.updateDownloadFinished.connect(self.on_update_download_finished)
+        self.update_download_worker.updateDownloadFailed.connect(self.on_update_download_failed)
+        self.update_download_worker.finished.connect(self.on_update_download_worker_finished)
+        self.update_download_worker.start()
+
+    @Slot()
+    def on_update_download_worker_finished(self) -> None:
+        self.update_download_worker = None
+        self.check_update_button.setText("检查更新")
+        self.check_update_button.setEnabled(True)
+
+    @Slot(object)
+    def on_update_download_finished(self, result: UpdateDownloadResult) -> None:
+        self.status_label.setText("更新包已下载")
+        self.append_log(f"更新包已下载 {result.path}")
+        QMessageBox.information(self, "下载完成", f"更新包已下载：\n{result.path}\n\n即将打开。")
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.path)))
+        if not opened:
+            QMessageBox.information(self, "请手动打开", f"请手动打开更新包：\n{result.path}")
+
+    @Slot(str)
+    def on_update_download_failed(self, message: str) -> None:
+        self.status_label.setText("更新下载失败")
+        self.append_log(f"更新下载失败: {message}")
+        QMessageBox.warning(self, "更新下载失败", message)
 
     @Slot()
     def choose_folder(self) -> None:
