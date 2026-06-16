@@ -27,11 +27,11 @@ def test_choose_asset_selects_current_platform_package() -> None:
     release = {
         "assets": [
             {
-                "name": "order-extraction-tool-windows.exe",
+                "name": "order-organizer-assistant-windows.exe",
                 "browser_download_url": "https://example.test/win.exe",
             },
             {
-                "name": "order-extraction-tool-macos.dmg",
+                "name": "order-organizer-assistant-macos.dmg",
                 "browser_download_url": "https://example.test/mac.dmg",
             },
         ]
@@ -191,19 +191,19 @@ def test_download_update_asset_writes_package_to_target_dir(tmp_path) -> None:
 
     result = updater.download_update_asset(
         "https://example.test/tool.exe",
-        "order-extraction-tool-windows.exe",
+        "order-organizer-assistant-windows.exe",
         target_dir=tmp_path,
         timeout=4.0,
         opener=opener,
     )
 
-    assert result.path == tmp_path / "order-extraction-tool-windows.exe"
+    assert result.path == tmp_path / "order-organizer-assistant-windows.exe"
     assert result.path.read_bytes() == b"installer"
     assert result.bytes_written == len(b"installer")
 
 
 def test_download_update_asset_replaces_existing_file_atomically(tmp_path) -> None:
-    existing = tmp_path / "order-extraction-tool-windows.exe"
+    existing = tmp_path / "order-organizer-assistant-windows.exe"
     existing.write_bytes(b"old")
 
     class Response:
@@ -232,14 +232,14 @@ def test_download_update_asset_replaces_existing_file_atomically(tmp_path) -> No
 
     result = updater.download_update_asset(
         "https://example.test/tool.exe",
-        "order-extraction-tool-windows.exe",
+        "order-organizer-assistant-windows.exe",
         target_dir=tmp_path,
         opener=opener,
     )
 
     assert result.path == existing
     assert existing.read_bytes() == b"new-version"
-    assert not (tmp_path / "order-extraction-tool-windows.exe.download").exists()
+    assert not (tmp_path / "order-organizer-assistant-windows.exe.download").exists()
 
 
 def test_download_update_asset_uses_url_filename_when_asset_name_missing(tmp_path) -> None:
@@ -262,11 +262,11 @@ def test_download_update_asset_uses_url_filename_when_asset_name_missing(tmp_pat
     assert hasattr(updater, "download_update_asset")
 
     result = updater.download_update_asset(
-        "https://example.test/downloads/order-extraction-tool-macos.dmg?token=abc",
+        "https://example.test/downloads/order-organizer-assistant-macos.dmg?token=abc",
         "",
         target_dir=tmp_path,
         opener=opener,
     )
 
-    assert result.path == tmp_path / "order-extraction-tool-macos.dmg"
+    assert result.path == tmp_path / "order-organizer-assistant-macos.dmg"
     assert result.path.read_bytes() == b"dmg"

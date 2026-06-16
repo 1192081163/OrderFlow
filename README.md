@@ -1,4 +1,4 @@
-# 订单提取工具
+# 订单整理助手
 
 可视化桌面工具，用来拖入订单 Excel 文件或文件夹，自动生成订单整理结果。
 
@@ -7,13 +7,13 @@
 GitHub Release 会直接提供：
 
 ```text
-order-extraction-tool-windows.exe
-order-extraction-tool-macos.dmg
+order-organizer-assistant-windows.exe
+order-organizer-assistant-macos.dmg
 ```
 
 同一个版本重新运行 Release workflow 时，会覆盖 Release 里的同名文件。
 
-桌面软件启动后会联网检查 GitHub Release。发现新版或同版本被覆盖成新构建时，会提示打开当前系统对应的下载文件；检查失败不会影响订单提取。
+桌面软件启动后会联网检查 GitHub Release。发现新版或同版本被覆盖成新构建时，会提示下载当前系统对应的安装包；检查失败不会影响订单提取。
 
 ### 发布新版本
 
@@ -40,11 +40,11 @@ build_windows.bat
 打包结果在：
 
 ```text
-order-extraction-tool-windows.exe
-dist\订单提取工具.exe
+order-organizer-assistant-windows.exe
+dist\订单整理助手.exe
 ```
 
-发给别人时，可以直接发送 `order-extraction-tool-windows.exe`。
+发给别人时，可以直接发送 `order-organizer-assistant-windows.exe`。
 
 ## macOS 本地打包
 
@@ -55,8 +55,8 @@ dist\订单提取工具.exe
 打包结果：
 
 ```text
-dist/订单提取工具.app
-order-extraction-tool-macos.dmg
+dist/订单整理助手.app
+order-organizer-assistant-macos.dmg
 ```
 
 ## 本地运行

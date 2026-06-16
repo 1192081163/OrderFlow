@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from branding import APP_DISPLAY_NAME
 from build_info import APP_BUILD_COMMIT, APP_RELEASE_TAG, APP_VERSION
 from desktop_runner import ExtractionResult, NoInputFilesError, run_extraction
 from updater import (
@@ -86,6 +87,11 @@ class DropZone(QFrame):
             event.acceptProposedAction()
         else:
             event.ignore()
+
+
+def resource_path(relative_path: str) -> Path:
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base_path / relative_path
 
 
 class ExtractionWorker(QThread):
@@ -163,7 +169,10 @@ class OrderExtractionWindow(QMainWindow):
         self.update_download_worker: UpdateDownloadWorker | None = None
         self.last_result: ExtractionResult | None = None
 
-        self.setWindowTitle("订单提取工具")
+        self.setWindowTitle(APP_DISPLAY_NAME)
+        icon_path = resource_path("assets/app_icon.png")
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.setMinimumSize(920, 680)
 
         root = QWidget()
@@ -176,7 +185,7 @@ class OrderExtractionWindow(QMainWindow):
         header = QHBoxLayout()
         title_group = QVBoxLayout()
         title_group.setSpacing(3)
-        title = QLabel("订单提取工具")
+        title = QLabel(APP_DISPLAY_NAME)
         title.setObjectName("appTitle")
         self.status_label = QLabel("等待拖入订单文件夹或 Excel 文件")
         self.status_label.setObjectName("statusText")

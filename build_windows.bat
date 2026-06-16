@@ -3,6 +3,9 @@ setlocal
 
 cd /d "%~dp0"
 
+set "APP_NAME=订单整理助手"
+set "ASSET_BASENAME=order-organizer-assistant"
+
 set "BUILD_INFO_BACKUP=%TEMP%\order_extraction_build_info_%RANDOM%.py"
 copy /y build_info.py "%BUILD_INFO_BACKUP%" >nul
 
@@ -24,13 +27,14 @@ echo APP_BUILD_COMMIT = "%BUILD_COMMIT%"
 py -m pip install -r requirements-desktop.txt pyinstaller
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
+if exist "%ASSET_BASENAME%-windows.exe" del /q "%ASSET_BASENAME%-windows.exe"
 if exist "order-extraction-tool-windows.exe" del /q "order-extraction-tool-windows.exe"
-py -m PyInstaller --clean --noconfirm --onefile --windowed --name "订单提取工具" --add-data "rules;rules" desktop_app.py
+py -m PyInstaller --clean --noconfirm --onefile --windowed --name "%APP_NAME%" --icon "assets\app_icon.ico" --add-data "rules;rules" --add-data "assets;assets" desktop_app.py
 set "BUILD_RESULT=%ERRORLEVEL%"
 copy /y "%BUILD_INFO_BACKUP%" build_info.py >nul
 del /q "%BUILD_INFO_BACKUP%" >nul 2>nul
 if not "%BUILD_RESULT%"=="0" exit /b %BUILD_RESULT%
-copy /y "dist\订单提取工具.exe" "order-extraction-tool-windows.exe"
+copy /y "dist\%APP_NAME%.exe" "%ASSET_BASENAME%-windows.exe"
 
-echo Built dist\订单提取工具.exe
-echo Created order-extraction-tool-windows.exe
+echo Built dist\%APP_NAME%.exe
+echo Created %ASSET_BASENAME%-windows.exe

@@ -4,13 +4,14 @@ from pathlib import Path
 
 
 ROOT = Path.cwd()
+APP_NAME = "订单整理助手"
 
 
 a = Analysis(
     ["desktop_app.py"],
     pathex=[str(ROOT)],
     binaries=[],
-    datas=[("rules", "rules")],
+    datas=[("rules", "rules"), ("assets", "assets")],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -29,7 +30,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="订单提取工具",
+    name=APP_NAME,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -48,16 +49,16 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="订单提取工具",
+    name=APP_NAME,
 )
 app = BUNDLE(
     coll,
-    name="订单提取工具.app",
-    icon=None,
-    bundle_identifier="com.r004.order-extraction-tool",
+    name=f"{APP_NAME}.app",
+    icon=str(ROOT / "assets" / "app_icon.icns"),
+    bundle_identifier="com.r004.order-organizer-assistant",
     info_plist={
-        "CFBundleDisplayName": "订单提取工具",
-        "CFBundleName": "订单提取工具",
+        "CFBundleDisplayName": APP_NAME,
+        "CFBundleName": APP_NAME,
         "NSHighResolutionCapable": True,
     },
 )

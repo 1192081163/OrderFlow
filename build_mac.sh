@@ -3,6 +3,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+APP_NAME="订单整理助手"
+ASSET_BASENAME="order-organizer-assistant"
+
 BUILD_INFO_BACKUP="$(mktemp)"
 cp build_info.py "$BUILD_INFO_BACKUP"
 restore_build_info() {
@@ -23,9 +26,9 @@ BUILD_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo "")"
 } > build_info.py
 
 python3 -m pip install -r requirements-desktop.txt pyinstaller
-rm -rf build dist "order-extraction-tool-macos.dmg"
+rm -rf build dist "${ASSET_BASENAME}-macos.dmg" "order-extraction-tool-macos.dmg"
 python3 -m PyInstaller --clean --noconfirm order_extraction_tool.spec
-hdiutil create -volname "订单提取工具" -srcfolder "dist/订单提取工具.app" -ov -format UDZO "order-extraction-tool-macos.dmg"
+hdiutil create -volname "$APP_NAME" -srcfolder "dist/${APP_NAME}.app" -ov -format UDZO "${ASSET_BASENAME}-macos.dmg"
 
-echo "Built dist/订单提取工具.app"
-echo "Created order-extraction-tool-macos.dmg"
+echo "Built dist/${APP_NAME}.app"
+echo "Created ${ASSET_BASENAME}-macos.dmg"

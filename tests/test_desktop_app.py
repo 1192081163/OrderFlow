@@ -15,7 +15,7 @@ def test_order_extraction_window_can_be_constructed() -> None:
 
     window = OrderExtractionWindow()
 
-    assert window.windowTitle() == "订单提取工具"
+    assert window.windowTitle() == "订单整理助手"
     assert app is not None
 
 
@@ -23,4 +23,4 @@ def test_run_smoke_test_prints_window_title(capsys) -> None:
     result = run_smoke_test()
 
     assert result == 0
-    assert "订单提取工具" in capsys.readouterr().out
+    assert "订单整理助手" in capsys.readouterr().out

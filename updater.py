@@ -9,12 +9,14 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import unquote, urlparse
 
+from branding import ASSET_BASENAME
+
 REPO_OWNER = "1192081163"
 REPO_NAME = "r004-order-extraction-tool"
 RELEASE_API_URL = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases/latest"
 TAG_REF_API_URL = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/git/ref/tags"
-WINDOWS_ASSET = "order-extraction-tool-windows.exe"
-MACOS_ASSET = "order-extraction-tool-macos.dmg"
+WINDOWS_ASSET = f"{ASSET_BASENAME}-windows.exe"
+MACOS_ASSET = f"{ASSET_BASENAME}-macos.dmg"
 
 
 def current_platform_asset() -> str:
@@ -87,18 +89,22 @@ def choose_asset(release: dict[str, Any], platform_asset: str) -> dict[str, Any]
     return None
 
 
+def request_headers() -> dict[str, str]:
+    return {"User-Agent": ASSET_BASENAME}
+
+
 def read_json_url(
     url: str,
     timeout: float = 6.0,
     opener: Callable[..., Any] = urllib.request.urlopen,
 ) -> dict[str, Any]:
-    request = urllib.request.Request(url, headers={"User-Agent": "order-extraction-tool"})
+    request = urllib.request.Request(url, headers=request_headers())
     with opener(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
 def default_update_download_dir() -> Path:
-    return Path.home() / "Downloads" / "order-extraction-tool-updates"
+    return Path.home() / "Downloads" / f"{ASSET_BASENAME}-updates"
 
 
 def update_asset_filename(download_url: str, asset_name: str) -> str:
@@ -106,7 +112,7 @@ def update_asset_filename(download_url: str, asset_name: str) -> str:
     if not candidate:
         parsed = urlparse(download_url)
         candidate = Path(unquote(parsed.path)).name
-    return candidate or "order-extraction-update"
+    return candidate or f"{ASSET_BASENAME}-update"
 
 
 def download_update_asset(
@@ -126,7 +132,7 @@ def download_update_asset(
     final_path = download_dir / filename
     temp_path = download_dir / f"{filename}.download"
 
-    request = urllib.request.Request(download_url, headers={"User-Agent": "order-extraction-tool"})
+    request = urllib.request.Request(download_url, headers=request_headers())
     bytes_written = 0
     with opener(request, timeout=timeout) as response:
         with temp_path.open("wb") as output:
