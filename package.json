@@ -12,6 +12,7 @@
     "dev": "npm run build:main && vite --host 127.0.0.1",
     "dist": "npm run dist:win",
     "dist:win": "npm run build && electron-builder --win nsis",
+    "dist:win:ci": "npm run build && electron-builder --win nsis --publish never",
     "start": "npm run build && electron .",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

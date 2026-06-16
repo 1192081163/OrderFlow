@@ -17,6 +17,9 @@ describe("Electron packaging configuration", () => {
     expect(packageJson.devDependencies).toHaveProperty("electron-builder");
     expect(packageJson.scripts.dist).toBe("npm run dist:win");
     expect(packageJson.scripts["dist:win"]).toBe("npm run build && electron-builder --win nsis");
+    expect(packageJson.scripts["dist:win:ci"]).toBe(
+      "npm run build && electron-builder --win nsis --publish never",
+    );
     expect(packageJson.scripts).not.toHaveProperty("dist:mac");
     expect(packageJson.build).toMatchObject({
       appId: "com.ausmet.order-organizer-assistant",
@@ -54,7 +57,7 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("actions/setup-python");
     expect(workflow).toContain("requirements-python-runner.txt");
     expect(workflow).toContain("scripts/build-python-runner-win.ps1");
-    expect(workflow).toContain("npm run dist:win");
+    expect(workflow).toContain("npm run dist:win:ci");
     expect(workflow).toContain('tag="build-${GITHUB_RUN_NUMBER}"');
     expect(workflow).toContain("gh release create");
     expect(workflow).toContain("--latest");
