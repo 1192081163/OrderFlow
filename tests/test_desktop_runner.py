@@ -14,6 +14,24 @@ def make_workbook(path: Path) -> None:
     wb.save(path)
 
 
+def make_order_workbook(path: Path, job: str) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Worksheet"
+    ws["C1"] = job
+    ws["C2"] = "Builder"
+    ws["C5"] = "2026-06-15"
+    ws["C6"] = "PO-1"
+    headers = ["Material", "Stock", "Qty", "Profile", "B/O", "Reveal Height", "Reveal Width"]
+    for col, value in enumerate(headers, start=1):
+        ws.cell(9, col).value = value
+    ws.cell(11, 1).value = "1.05mm Zincanneal"
+    ws.cell(11, 3).value = 1
+    ws.cell(11, 4).value = "Modern"
+    ws.cell(11, 7).value = 823
+    wb.save(path)
+
+
 def test_resolve_input_paths_accepts_folder_and_filters_excel_files(tmp_path: Path) -> None:
     make_workbook(tmp_path / "order.xlsx")
     make_workbook(tmp_path / "order.xlsm")
@@ -71,3 +89,15 @@ def test_default_output_paths_use_output_folder(tmp_path: Path) -> None:
 def test_run_extraction_rejects_no_valid_files(tmp_path: Path) -> None:
     with pytest.raises(NoInputFilesError, match="No valid order Excel files"):
         run_extraction([tmp_path / "notes.txt"])
+
+
+def test_run_extraction_keeps_latest_source_version_for_duplicate_jobs(tmp_path: Path) -> None:
+    older = tmp_path / "29698__0178__old__29698 BEYOND RES SPLIT + CS.xlsx"
+    newer = tmp_path / "29698__0216__new__29698 BEYOND RES SPLIT + CS.xlsx"
+    make_order_workbook(older, "29698")
+    make_order_workbook(newer, "29698")
+
+    result = run_extraction([tmp_path])
+
+    assert len(result.rows) == 1
+    assert result.rows[0].source_file == newer.name

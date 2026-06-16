@@ -134,6 +134,7 @@ def run_extraction(
             if progress:
                 progress(index, total, path, "completed")
 
+    rows = extract.dedupe_latest_rows(rows, resolution.input_files)
     extract.write_csv(rows, outputs.csv_output)
     extract.write_xlsx(rows, outputs.xlsx_output, resolution.base_dir, resolution.input_files)
     extract.write_audit_csv(rows, outputs.audit_output)

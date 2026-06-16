@@ -10,6 +10,8 @@ build/
 dist/
 *.spec.bak
 *.zip
+*.dmg
+*.exe
 
 # Local app/runtime logs
 *.log

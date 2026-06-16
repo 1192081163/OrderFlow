@@ -75,6 +75,7 @@ MANUAL_OR_SCHEDULED_COLUMNS = {
 }
 
 OVER_SIZE_WIDTH_THRESHOLD = 1024
+CAVITY_SLIDER_MITRE_QTY = 14
 
 COLORBOND_COLOUR_MARKERS = {
     "basalt",
@@ -145,6 +146,22 @@ CHINA_2026_ADJUSTED_WORKDAYS = {
     dt.date(2026, 5, 9),
     dt.date(2026, 9, 20),
     dt.date(2026, 10, 10),
+}
+
+WA_2026_PUBLIC_HOLIDAYS = {
+    dt.date(2026, 1, 1),
+    dt.date(2026, 1, 26),
+    dt.date(2026, 3, 2),
+    dt.date(2026, 4, 3),
+    dt.date(2026, 4, 5),
+    dt.date(2026, 4, 6),
+    dt.date(2026, 4, 25),
+    dt.date(2026, 4, 27),
+    dt.date(2026, 6, 1),
+    dt.date(2026, 9, 28),
+    dt.date(2026, 12, 25),
+    dt.date(2026, 12, 26),
+    dt.date(2026, 12, 28),
 }
 
 
@@ -292,8 +309,8 @@ def rule_key(value: Any) -> str:
 def load_rules(rules_dir: Path) -> RuleSet:
     builder_aliases: dict[str, str] = {}
     goods_ignore_patterns: list[str] = []
-    holidays = set(CHINA_2026_HOLIDAYS)
-    adjusted_workdays = set(CHINA_2026_ADJUSTED_WORKDAYS)
+    holidays = set(WA_2026_PUBLIC_HOLIDAYS)
+    adjusted_workdays: set[dt.date] = set()
 
     builder_path = rules_dir / "builder_aliases.csv"
     if builder_path.exists():
@@ -312,7 +329,7 @@ def load_rules(rules_dir: Path) -> RuleSet:
                 if pattern:
                     goods_ignore_patterns.append(pattern)
 
-    calendar_path = rules_dir / "china_workdays_2026.csv"
+    calendar_path = rules_dir / "wa_public_holidays_2026.csv"
     if calendar_path.exists():
         holidays.clear()
         adjusted_workdays.clear()
@@ -542,10 +559,26 @@ def profile_tables_over_size_qty(ws: Any) -> float:
             if product_qty <= 0:
                 continue
             max_width = max([width_value(ws.cell(idx, col).value) for col in width_cols] or [0])
-            if ws.title == "Main Sheet":
-                hand = clean_text(ws.cell(idx, 5).value).upper()
-                if "DOUBLE" not in hand:
-                    continue
+            if max_width > OVER_SIZE_WIDTH_THRESHOLD:
+                qty_total += float(product_qty)
+    for header_row, profile_col in find_sheet1_profileless_table_headers(ws):
+        product_qty_col = sheet1_product_qty_column(ws, header_row, profile_col)
+        width_cols = sheet1_width_columns(ws, header_row)
+        for idx in range(header_row + 1, ws.max_row + 1):
+            if row_is_hidden(ws, idx):
+                continue
+            if row_looks_profileless_table_header(ws, idx):
+                break
+            first = clean_text(ws.cell(idx, 1).value)
+            profile = ws.cell(idx, profile_col).value
+            if not first or first.lower().startswith("material"):
+                break
+            if not has_value(profile):
+                break
+            product_qty = sheet1_product_qty(ws, idx, profile_col, product_qty_col)
+            if product_qty <= 0:
+                continue
+            max_width = max([width_value(ws.cell(idx, col).value) for col in width_cols] or [0])
             if max_width > OVER_SIZE_WIDTH_THRESHOLD:
                 qty_total += float(product_qty)
     return qty_total + cavity_without_profile_over_size_qty(ws)
@@ -603,7 +636,7 @@ def parse_sheet1_delivery_date(value: Any, row: ExtractedRow) -> dt.date | None:
     return None
 
 
-def is_china_workday(day: dt.date) -> bool:
+def is_wa_workday(day: dt.date) -> bool:
     if day in RULES.adjusted_workdays:
         return True
     if day in RULES.holidays:
@@ -615,7 +648,7 @@ def previous_business_day(day: dt.date | None) -> dt.date | None:
     if day is None:
         return None
     current = day - dt.timedelta(days=1)
-    while not is_china_workday(current):
+    while not is_wa_workday(current):
         current -= dt.timedelta(days=1)
     return current
 
@@ -673,7 +706,9 @@ def material_code(raw: Any) -> str | None:
     if not match:
         return None
     thickness = match.group(1)
-    if thickness == "1.05":
+    if thickness == "0.55":
+        thickness = "0.6"
+    elif thickness == "1.05":
         thickness = "1"
     else:
         thickness = format(Decimal(thickness).normalize(), "f")
@@ -725,13 +760,15 @@ def classify_goods(profile: Any, row: ExtractedRow | None = None) -> str | None:
     upper = text.upper()
     if "CAVITY" in upper or "SLIDER" in upper:
         return "CS"
+    if "SERVICE PART" in upper:
+        return "PART"
     if "SKIN" in upper or "DOOR SKIN" in upper:
         return "DS"
     if "SPLIT" in upper:
         if "DELUXE" in upper or re.search(r"\bDL\b", upper):
             return "SPLIT DL"
         return "SPLIT"
-    if "KNOCK" in upper or upper == "KD":
+    if "KNOCK" in upper or re.search(r"\bKD\b", upper):
         return "KD"
     if "MODERN" in upper:
         return "MODERN"
@@ -770,6 +807,9 @@ def classify_goods_with_context(profile: Any, context: str, row: ExtractedRow | 
     if "DOOR STOP BUILD UP" in source_upper:
         return "CP"
 
+    if "TRAD DYNA" in source_upper:
+        return "COMMERCIAL"
+
     if "CAPPING" in upper:
         return "CAPPING"
 
@@ -790,9 +830,52 @@ def classify_goods_with_context(profile: Any, context: str, row: ExtractedRow | 
 
 def add_goods(goods_totals: dict[str, float], goods: str | None, qty: Any) -> None:
     qty_num = number_or_none(qty)
-    if not goods or qty_num is None or qty_num == 0:
+    if not goods or qty_num is None or qty_num <= 0:
         return
     goods_totals[goods] = goods_totals.get(goods, 0) + float(qty_num)
+
+
+def looks_like_commercial_profile_code(profile: Any) -> bool:
+    text = clean_text(profile).upper()
+    if not text:
+        return False
+    if re.fullmatch(r"\d+(?:\.\d+)?", text):
+        return True
+    if re.fullmatch(r"\d+[A-Z]", text):
+        return True
+    if re.fullmatch(r"\d+[A-Z]?B/O", text):
+        return True
+    if re.fullmatch(r"[A-Z]", text):
+        return True
+    return bool(re.fullmatch(r"[A-Z]{1,4}-?\d+[A-Z]?(?:-[A-Z0-9]+)?", text))
+
+
+def should_fallback_commercial_profile(row: ExtractedRow, profile: Any, context: str) -> bool:
+    source_upper = row.source_file.upper()
+    context_upper = context.upper()
+    if "DOOR SKIN" in source_upper and "CAPPING" in context_upper:
+        return False
+    return looks_like_commercial_profile_code(profile)
+
+
+def is_cavity_accessory_profile(profile: Any) -> bool:
+    upper = clean_text(profile).upper()
+    return "SOFT CLOSER" in upper or "SOFT CLOSE" in upper
+
+
+def is_replacement_head_only(profile: Any, context: str) -> bool:
+    return "HEAD ONLY" in clean_text(profile).upper() and "REPLACEMENT HEAD" in context.upper()
+
+
+def split_mitre_multiplier(profile: Any, is_double: bool = False) -> int:
+    upper = clean_text(profile).upper()
+    if re.search(r"\bPART\s+[AB]\s+ONLY\b", upper):
+        return 1
+    return 3 if is_double else 2
+
+
+def commercial_double_mitre_extra(hand: Any) -> float:
+    return 0.5 if "DOUBLE ACTION" in clean_text(hand).upper() else 1.0
 
 
 def profile_is_deluxe_dry_lining(profile: Any) -> bool:
@@ -857,7 +940,7 @@ def write_goods(row: ExtractedRow, goods_totals: dict[str, float]) -> None:
     items = [(goods, qty) for goods, qty in goods_totals.items() if qty]
     if not items:
         return
-    items.sort(key=lambda item: (-item[1], item[0]))
+    items.sort(key=lambda item: -item[1])
     row.values[10] = int(items[0][1]) if items[0][1].is_integer() else items[0][1]
     row.values[11] = goods_output_type(items[0][0])
     if len(items) > 1:
@@ -941,6 +1024,8 @@ def extract_worksheet_workbook(path: Path, row: ExtractedRow, wb: Any, infer_man
         is_cavity = worksheet_row_is_cavity(ws, idx)
         if is_cavity and goods in {None, "MODERN", "DELUXE"}:
             goods = "CS"
+        if is_cavity and is_cavity_accessory_profile(profile):
+            goods = None
         code = material_code(material_raw)
         if code:
             materials.append(code)
@@ -949,7 +1034,10 @@ def extract_worksheet_workbook(path: Path, row: ExtractedRow, wb: Any, infer_man
             if default_code:
                 materials.append(default_code)
         if not material_is_other:
-            add_goods(goods_totals, worksheet_goods_bucket(profile, goods), qty)
+            goods_bucket = worksheet_goods_bucket(profile, goods)
+            if is_replacement_head_only(profile, row_context(ws, idx)):
+                goods_bucket = None
+            add_goods(goods_totals, goods_bucket, qty)
             max_width = max(width_value(ws[f"G{idx}"].value), width_value(ws[f"I{idx}"].value))
             if qty > 0 and max_width > OVER_SIZE_WIDTH_THRESHOLD:
                 over_size_qty += float(qty)
@@ -964,25 +1052,24 @@ def extract_worksheet_workbook(path: Path, row: ExtractedRow, wb: Any, infer_man
                 w_total += qty * hinge
             else:
                 line_v = qty * (hinge + striker + sill)
-            if goods == "KD":
-                line_v += qty * 4
             line_v += deluxe_cleats_extra_parts(path, profile, goods, qty)
             v_total += line_v
+            if goods == "KD" and qty > 0:
+                x_total += qty * 4
 
         is_double = clean_text(ws[f"O{idx}"].value).upper() == "YES"
-        if is_double:
+        if qty > 0 and is_double:
             double_qty += qty
 
-        if goods in {"SPLIT", "SPLIT DL"}:
-            mitre_total += qty * (3 if is_double else 2)
-        elif goods in {"MODERN", "DELUXE", "COMMERCIAL"}:
-            mitre_total += qty
-            if is_double:
-                mitre_total += 1
-
-        profile_upper = clean_text(profile).upper()
-        if "EVOKE KNOCKDOWN" in profile_upper:
-            x_total += line_v
+        if qty > 0:
+            if goods in {"SPLIT", "SPLIT DL"}:
+                mitre_total += qty * split_mitre_multiplier(profile, is_double)
+            elif goods == "CS":
+                mitre_total += qty * CAVITY_SLIDER_MITRE_QTY
+            elif goods in {"MODERN", "DELUXE", "COMMERCIAL"}:
+                mitre_total += qty
+                if is_double:
+                    mitre_total += 1
 
     if infer_manual:
         write_over_size(row, workbook_over_size_marker(wb), over_size_qty)
@@ -1003,6 +1090,47 @@ def extract_worksheet_workbook(path: Path, row: ExtractedRow, wb: Any, infer_man
             row.parts_w_multiplier = 1.0
         if x_total:
             row.values[23] = excel_display_int(x_total)
+
+
+def extract_nonstandard_worksheet_goods(ws: Any, row: ExtractedRow, infer_manual: bool = False) -> bool:
+    goods_totals: dict[str, float] = {}
+    mitre_total = 0.0
+    for header_row in range(1, min(ws.max_row, 180) + 1):
+        if row_is_hidden(ws, header_row):
+            continue
+        headers = {clean_text(ws.cell(header_row, col).value).lower(): col for col in range(1, ws.max_column + 1)}
+        door_col = headers.get("door #")
+        qty_col = headers.get("qty") or headers.get("quantity")
+        if not door_col or not qty_col:
+            continue
+        for idx in range(header_row + 1, ws.max_row + 1):
+            if row_is_hidden(ws, idx):
+                continue
+            if clean_text(ws.cell(idx, 1).value).lower() == "material":
+                break
+            qty = number_or_none(ws.cell(idx, qty_col).value)
+            if qty is None or qty <= 0:
+                continue
+            door = ws.cell(idx, door_col).value
+            if not has_value(door):
+                continue
+            context = row_context(ws, idx)
+            goods = classify_goods_with_context(door, context, row)
+            if not goods and should_fallback_commercial_profile(row, door, context):
+                goods = "COMMERCIAL"
+            add_goods(goods_totals, goods, qty)
+            if goods in {"SPLIT", "SPLIT DL"}:
+                mitre_total += float(qty) * split_mitre_multiplier(door)
+            elif goods == "CS":
+                mitre_total += float(qty) * CAVITY_SLIDER_MITRE_QTY
+            elif goods in {"MODERN", "DELUXE", "COMMERCIAL"}:
+                mitre_total += float(qty)
+        if goods_totals:
+            break
+    write_goods(row, goods_totals)
+    if infer_manual and mitre_total:
+        row.values[19] = excel_display_int(mitre_total)
+    return bool(goods_totals)
 
 
 def extract_nonstandard_worksheet_metadata(path: Path, row: ExtractedRow, wb: Any, infer_manual: bool = False) -> None:
@@ -1032,7 +1160,8 @@ def extract_nonstandard_worksheet_metadata(path: Path, row: ExtractedRow, wb: An
         row.values[16] = completion.strftime("%A") if completion else None
 
     row.values[9] = sheet1_material(ws)
-    row.add_manual_check("unsupported worksheet detail layout: nonstandard detail header")
+    if not extract_nonstandard_worksheet_goods(ws, row, infer_manual=infer_manual):
+        row.add_manual_check("unsupported worksheet detail layout: nonstandard detail header")
 
 
 def iter_main_detail_rows(ws: Any) -> list[int]:
@@ -1117,9 +1246,11 @@ def extract_main_workbook(path: Path, row: ExtractedRow, wb: Any, infer_manual: 
         if goods in {"SPLIT", "SPLIT DL"}:
             if hand == "DOUBLE":
                 double_qty += product_qty
-                mitre_total += product_qty * 3
+                mitre_total += product_qty * split_mitre_multiplier(profile, True)
             else:
-                mitre_total += product_qty * 2
+                mitre_total += product_qty * split_mitre_multiplier(profile, False)
+        elif goods == "CS":
+            mitre_total += product_qty * CAVITY_SLIDER_MITRE_QTY
         elif goods in {"COMMERCIAL", "MODERN", "DELUXE"}:
             mitre_total += product_qty
 
@@ -1251,7 +1382,7 @@ def find_sheet1_profile_headers(ws: Any) -> list[tuple[int, int]]:
         if row_is_hidden(ws, row_idx):
             continue
         for col_idx in range(1, ws.max_column + 1):
-            if clean_text(ws.cell(row_idx, col_idx).value).lower() == "profile":
+            if clean_text(ws.cell(row_idx, col_idx).value).lower().startswith("profile"):
                 headers.append((row_idx, col_idx))
     return headers
 
@@ -1284,6 +1415,13 @@ def sheet1_product_qty_column(ws: Any, header_row: int, profile_col: int | None 
         if sheet1_qty_column_is_hardware(ws, header_row, col_idx):
             continue
         return col_idx
+    return None
+
+
+def sheet1_hand_column(ws: Any, header_row: int) -> int | None:
+    for col_idx in range(1, ws.max_column + 1):
+        if re.search(r"\bHAND\b", sheet1_header_text(ws, header_row, col_idx)):
+            return col_idx
     return None
 
 
@@ -1347,6 +1485,14 @@ def sheet1_w_part_columns(ws: Any, header_row: int) -> list[int]:
         if any(token in header for token in ("HINGE HOLDER", "3751", "WS7", "MIB")):
             columns.append(col_idx)
     return columns
+
+
+def sheet1_row_has_hinge_plates(ws: Any, row_idx: int, header_row: int) -> bool:
+    for col_idx in range(1, ws.max_column + 1):
+        header = sheet1_header_text(ws, header_row, col_idx)
+        if "HINGE PLATE" in header and has_value(ws.cell(row_idx, col_idx).value):
+            return True
+    return False
 
 
 def sheet1_hinge_qty_column(ws: Any, header_row: int) -> int | None:
@@ -1430,7 +1576,7 @@ def sheet1_line_hardware_totals(
 
     v_total = product_qty * (part_qty + striker_qty + sill_qty)
     w_total = product_qty * w_extra_qty
-    if hinge_qty_bucket == "v":
+    if hinge_qty_bucket == "v" and not sheet1_row_has_hinge_plates(ws, row_idx, header_row):
         v_total += product_qty * float(hinge_qty or 0)
     else:
         w_total += product_qty * float(hinge_qty or 0)
@@ -1478,6 +1624,7 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
     for header_index, (header_row, profile_col) in enumerate(headers):
         next_header_row = headers[header_index + 1][0] if header_index + 1 < len(headers) else ws.max_row + 1
         product_qty_col = sheet1_product_qty_column(ws, header_row, profile_col)
+        hand_col = sheet1_hand_column(ws, header_row) or 5
         is_cavity_table = sheet1_table_is_cavity(ws, header_row)
         table_has_flat_sheet = table_contains_text(ws, header_row + 1, next_header_row, "FLAT SHEET")
 
@@ -1502,13 +1649,19 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
             goods = goods or door_skin_capping_only_goods(row, context, table_has_flat_sheet)
             if is_cavity_table and goods in {None, "MODERN", "DELUXE"}:
                 goods = "CS"
+            elif not goods and should_fallback_commercial_profile(row, profile, context):
+                goods = "COMMERCIAL"
+            if is_cavity_table and is_cavity_accessory_profile(profile):
+                goods = None
+            if is_replacement_head_only(profile, context):
+                goods = None
             if is_cavity_table:
                 default_code = cavity_slider_default_material(profile)
                 if default_code:
                     materials.append(default_code)
             add_goods(goods_totals, goods, product_qty)
 
-            hand = clean_text(ws.cell(idx, 5).value).upper()
+            hand = clean_text(ws.cell(idx, hand_col).value).upper()
             is_double = "DOUBLE" in hand
             if not is_double:
                 for col_idx in range(1, ws.max_column + 1):
@@ -1521,11 +1674,13 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
                 double_qty += product_qty
 
             if goods in {"SPLIT", "SPLIT DL"}:
-                mitre_total += product_qty * (3 if is_double else 2)
-            elif goods in {"MODERN", "DELUXE", "COMMERCIAL", "KD"}:
+                mitre_total += product_qty * split_mitre_multiplier(profile, is_double)
+            elif goods == "CS":
+                mitre_total += product_qty * CAVITY_SLIDER_MITRE_QTY
+            elif goods in {"MODERN", "DELUXE", "COMMERCIAL"}:
                 mitre_total += product_qty
                 if goods == "COMMERCIAL" and is_double:
-                    mitre_total += 1
+                    mitre_total += commercial_double_mitre_extra(hand)
 
             line_v, line_w = sheet1_line_hardware_totals(
                 ws,
@@ -1537,16 +1692,17 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
             )
             v_total += line_v
             w_total += line_w
+            if goods == "KD":
+                x_total += product_qty * 4
             if ws.title == "Sheet1" and any(
                 "HOLES" in sheet1_header_text(ws, header_row, col_idx) and has_value(ws.cell(idx, col_idx).value)
                 for col_idx in range(1, ws.max_column + 1)
             ):
                 row.parts_extra += product_qty
-            if "EVOKE KNOCKDOWN" in clean_text(profile).upper():
-                x_total += line_v
 
     for header_row, profile_col in profileless_headers:
         product_qty_col = sheet1_product_qty_column(ws, header_row, profile_col)
+        hand_col = sheet1_hand_column(ws, header_row) or 5
         is_cavity_table = sheet1_table_is_cavity(ws, header_row)
         table_has_flat_sheet = table_contains_text(ws, header_row + 1, ws.max_row + 1, "FLAT SHEET")
 
@@ -1572,23 +1728,31 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
                 goods = "COMMERCIAL"
             if is_cavity_table and goods in {None, "MODERN", "DELUXE"}:
                 goods = "CS"
+            elif not goods and should_fallback_commercial_profile(row, profile, context):
+                goods = "COMMERCIAL"
+            if is_cavity_table and is_cavity_accessory_profile(profile):
+                goods = None
+            if is_replacement_head_only(profile, context):
+                goods = None
             if is_cavity_table:
                 default_code = cavity_slider_default_material(profile)
                 if default_code:
                     materials.append(default_code)
             add_goods(goods_totals, goods, product_qty)
 
-            hand = clean_text(ws.cell(idx, 5).value).upper()
+            hand = clean_text(ws.cell(idx, hand_col).value).upper()
             is_double = "DOUBLE" in hand
             if is_double:
                 double_qty += product_qty
 
             if goods in {"SPLIT", "SPLIT DL"}:
-                mitre_total += product_qty * (3 if is_double else 2)
-            elif goods in {"MODERN", "DELUXE", "COMMERCIAL", "KD"}:
+                mitre_total += product_qty * split_mitre_multiplier(profile, is_double)
+            elif goods == "CS":
+                mitre_total += product_qty * CAVITY_SLIDER_MITRE_QTY
+            elif goods in {"MODERN", "DELUXE", "COMMERCIAL"}:
                 mitre_total += product_qty
                 if goods == "COMMERCIAL" and is_double:
-                    mitre_total += 1
+                    mitre_total += commercial_double_mitre_extra(hand)
 
             line_v, line_w = sheet1_line_hardware_totals(
                 ws,
@@ -1600,6 +1764,8 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
             )
             v_total += line_v
             w_total += line_w
+            if goods == "KD":
+                x_total += product_qty * 4
             if ws.title == "Main Sheet" and goods == "COMMERCIAL" and line_w:
                 row.parts_w_multiplier = 1.0
 
@@ -1706,6 +1872,46 @@ def collect_input_files(input_dir: Path, recursive: bool = False) -> list[Path]:
             continue
         paths.append(path)
     return paths
+
+
+def source_version_number(source_file: str) -> int | None:
+    match = re.search(r"__(\d+)__", source_file)
+    return int(match.group(1)) if match else None
+
+
+def source_file_mtime_ns(source_file: str, paths_by_name: dict[str, Path]) -> int:
+    path = paths_by_name.get(source_file)
+    if not path:
+        return 0
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def source_version_sort_key(row: ExtractedRow, paths_by_name: dict[str, Path]) -> tuple[int, int, int, str]:
+    version = source_version_number(row.source_file)
+    if version is not None:
+        return (1, version, source_file_mtime_ns(row.source_file, paths_by_name), row.source_file)
+    return (0, 0, source_file_mtime_ns(row.source_file, paths_by_name), row.source_file)
+
+
+def dedupe_latest_rows(rows: list[ExtractedRow], input_files: list[Path]) -> list[ExtractedRow]:
+    paths_by_name = {path.name: path for path in input_files}
+    selected: dict[str, tuple[int, tuple[int, int, int, str], ExtractedRow]] = {}
+    passthrough: list[tuple[int, ExtractedRow]] = []
+    for index, row in enumerate(rows):
+        job = normalized_cell(row.values[6])
+        if not job:
+            passthrough.append((index, row))
+            continue
+        key = source_version_sort_key(row, paths_by_name)
+        current = selected.get(job)
+        if current is None or key > current[1]:
+            selected[job] = (index, key, row)
+
+    indexed_rows = passthrough + [(index, row) for index, _, row in selected.values()]
+    return [row for _, row in sorted(indexed_rows, key=lambda item: item[0])]
 
 
 def write_csv(rows: list[ExtractedRow], output: Path) -> None:
@@ -1957,6 +2163,7 @@ def main() -> int:
     input_files = collect_input_files(input_dir, recursive=args.recursive)
     for path in input_files:
         rows.append(extract_workbook(path, infer_manual=args.infer_manual))
+    rows = dedupe_latest_rows(rows, input_files)
 
     write_csv(rows, output)
     if args.xlsx_output:

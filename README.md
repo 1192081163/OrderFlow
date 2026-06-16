@@ -2,7 +2,29 @@
 
 可视化桌面工具，用来拖入订单 Excel 文件或文件夹，自动生成订单整理结果。
 
-## Windows 打包
+## GitHub Release 下载
+
+GitHub Release 会直接提供：
+
+```text
+订单提取工具-windows.exe
+订单提取工具-macos.dmg
+```
+
+同一个版本重新运行 Release workflow 时，会覆盖 Release 里的同名文件。
+
+### 发布新版本
+
+推送版本标签后会自动测试、打包并上传 Release：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+也可以在 GitHub Actions 的 `Build Release` 工作流里手动运行，输入同一个 tag 会覆盖该版本的 `.exe` 和 `.dmg`。
+
+## Windows 本地打包
 
 1. 安装 Python 3.12，并勾选 `Add Python to PATH`。
 2. 打开 CMD 或 PowerShell。
@@ -16,18 +38,13 @@ build_windows.bat
 打包结果在：
 
 ```text
-dist\订单提取工具\订单提取工具.exe
+订单提取工具-windows.exe
+dist\订单提取工具.exe
 ```
 
-发给别人时，请压缩并发送整个文件夹：
+发给别人时，可以直接发送 `订单提取工具-windows.exe`。
 
-```text
-dist\订单提取工具\
-```
-
-不要只发送单独的 `.exe`，因为旁边还有 Python、PySide6 和规则文件依赖。
-
-## macOS 打包
+## macOS 本地打包
 
 ```bash
 ./build_mac.sh
@@ -37,7 +54,7 @@ dist\订单提取工具\
 
 ```text
 dist/订单提取工具.app
-订单提取工具-mac.zip
+订单提取工具-macos.dmg
 ```
 
 ## 本地运行
@@ -56,8 +73,9 @@ python3 desktop_app.py
 - `tests/`: 仓库内可运行的回归测试。
 - `data/`: 本地订单源文件和 Job Track 对照表，默认不提交。
 - `reports/`: 本地对比报告和临时提取结果，默认不提交。
-- `build_windows.bat`: Windows 打包脚本。
-- `build_mac.sh`: macOS 打包脚本。
+- `build_windows.bat`: Windows 单文件 `.exe` 打包脚本。
+- `build_mac.sh`: macOS `.dmg` 打包脚本。
+- `.github/workflows/release.yml`: GitHub Release 自动构建和覆盖上传配置。
 
 ## 本地文件夹归类
 
@@ -69,7 +87,7 @@ reports/
   jobtrack_0610_compare/         最近一次 Job Track 对比报告
 ```
 
-`build/`、`dist/`、`*.zip`、`__pycache__/`、`.pytest_cache/` 都是可重新生成的产物，清理项目时可以删除。
+`build/`、`dist/`、`*.zip`、`*.dmg`、`*.exe`、`__pycache__/`、`.pytest_cache/` 都是可重新生成的产物，清理项目时可以删除。
 
 ## 数据安全
 
