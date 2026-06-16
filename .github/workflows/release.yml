@@ -167,7 +167,7 @@ jobs:
         shell: bash
         run: |
           for old_asset in "-windows.exe" "-macos.dmg"; do
-            gh release delete-asset "$TAG_NAME" "$old_asset" -y >/dev/null 2>&1 || true
+            gh release delete-asset "$TAG_NAME" --yes -- "$old_asset" >/dev/null 2>&1 || true
           done
           gh release upload "$TAG_NAME" \
             "release-assets/windows-exe/${{ env.ASSET_BASENAME }}-windows.exe" \
