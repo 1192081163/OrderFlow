@@ -1,0 +1,84 @@
+{
+  "name": "order-organizer-assistant",
+  "version": "1.0.0",
+  "description": "Electron TypeScript order organizer assistant",
+  "author": "AUSMET",
+  "main": "dist/main/main.js",
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:main && npm run build:renderer",
+    "build:main": "tsc -p tsconfig.json",
+    "build:renderer": "vite build",
+    "dev": "npm run build:main && vite --host 127.0.0.1",
+    "dist": "npm run dist:win",
+    "dist:win": "npm run build && electron-builder --win nsis",
+    "start": "npm run build && electron .",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/mailparser": "^3.4.6",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "electron": "^39.2.6",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.16",
+    "vitest": "^4.0.14"
+  },
+  "dependencies": {
+    "@fluentui/react-components": "^9.74.1",
+    "exceljs": "^4.4.0",
+    "imapflow": "^1.2.1",
+    "mailparser": "^3.9.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "build": {
+    "appId": "com.ausmet.order-organizer-assistant",
+    "productName": "订单整理助手",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "python-helper",
+        "to": "python-helper"
+      },
+      {
+        "from": "python_extraction_bridge.py",
+        "to": "python/python_extraction_bridge.py"
+      },
+      {
+        "from": "desktop_runner.py",
+        "to": "python/desktop_runner.py"
+      },
+      {
+        "from": "extract.py",
+        "to": "python/extract.py"
+      },
+      {
+        "from": "rules",
+        "to": "python/rules"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/app_icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "order-organizer-assistant-windows.${ext}"
+    }
+  }
+}

@@ -5,9 +5,14 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 
+# JavaScript / Electron
+node_modules/
+.vite/
+
 # Local build artifacts
 build/
 dist/
+release/
 *.spec.bak
 *.zip
 *.dmg
