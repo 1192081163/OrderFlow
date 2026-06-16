@@ -1400,6 +1400,8 @@ def sheet1_header_text(ws: Any, header_row: int, col_idx: int) -> str:
 
 def sheet1_qty_column_is_hardware(ws: Any, header_row: int, col_idx: int) -> bool:
     header = sheet1_header_text(ws, header_row, col_idx)
+    if sheet1_dyna_hardware_multiplier(header):
+        return True
     if any(token in header for token in ("HINGE", "STRIKER", "DYNA", "BOLT", "PLATE")):
         return True
     prev_header = sheet1_header_text(ws, header_row, col_idx - 1) if col_idx > 1 else ""
@@ -1473,9 +1475,21 @@ def sheet1_numeric_part_columns(ws: Any, header_row: int) -> list[int]:
         header = sheet1_header_text(ws, header_row, col_idx)
         if "BACKING PLATE" in header or "HINGE" in header or "STRIKER" in header:
             continue
-        if any(token in header for token in ("STUD", "DYNA", "2110")):
+        if sheet1_dyna_hardware_multiplier(header) or any(token in header for token in ("STUD", "DYNA", "2110")):
             columns.append(col_idx)
     return columns
+
+
+def sheet1_dyna_hardware_multiplier(header: str) -> int | None:
+    normalized = re.sub(r"[^A-Z0-9]+", " ", header.upper()).strip()
+    tokens = set(normalized.split())
+    if {"CSK", "DTNA"}.issubset(tokens):
+        return 2
+    if "CSK" in tokens and "DYNA" in tokens and "TUBE" in tokens:
+        return 4
+    if "DYNA" in tokens and ("TRADITION" in tokens or "TRAD" in tokens):
+        return 1
+    return None
 
 
 def sheet1_w_part_columns(ws: Any, header_row: int) -> list[int]:
@@ -1498,6 +1512,8 @@ def sheet1_row_has_hinge_plates(ws: Any, row_idx: int, header_row: int) -> bool:
 def sheet1_hinge_qty_column(ws: Any, header_row: int) -> int | None:
     for col_idx in range(1, ws.max_column + 1):
         header = sheet1_header_text(ws, header_row, col_idx)
+        if sheet1_dyna_hardware_multiplier(header):
+            continue
         if "HINGE" in header and "QTY" in header:
             return col_idx
         if re.search(r"\bQTY\b", header) and sheet1_qty_column_is_hardware(ws, header_row, col_idx):
@@ -1568,7 +1584,11 @@ def sheet1_line_hardware_totals(
     w_part_cols = sheet1_w_part_columns(ws, header_row)
     hinge_qty_col = sheet1_hinge_qty_column(ws, header_row)
 
-    part_qty = sum(float(number_or_none(ws.cell(row_idx, col).value) or 0) for col in part_cols)
+    part_qty = sum(
+        float(number_or_none(ws.cell(row_idx, col).value) or 0)
+        * float(sheet1_dyna_hardware_multiplier(sheet1_header_text(ws, header_row, col)) or 1)
+        for col in part_cols
+    )
     striker_qty = 1 if any(has_value(ws.cell(row_idx, col).value) for col in striker_cols) else 0
     sill_qty = 1 if any(has_value(ws.cell(row_idx, col).value) for col in sill_cols) else 0
     w_extra_qty = sum(float(number_or_none(ws.cell(row_idx, col).value) or 0) for col in w_part_cols)

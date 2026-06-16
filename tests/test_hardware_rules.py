@@ -406,6 +406,51 @@ def test_sheet1_hinges_quantity_goes_to_v_bucket(tmp_path: Path) -> None:
     assert row.values[19:24] == [2, 5, 4, None, None]
 
 
+def test_sheet1_csk_dtna_counts_two_parts_per_quantity(tmp_path: Path) -> None:
+    wb = sheet1_profile_book()
+    ws = wb["Sheet1"]
+    ws.cell(10, 6).value = "CSK"
+    ws.cell(11, 6).value = "DTNA"
+    values = [1, "Split 180B/O (35 Door)", 2060, 923, "RIGHT", "10 (5 EACH SIDE)", "", "", 1000, ""]
+    for col, value in enumerate(values, start=1):
+        ws.cell(13, col).value = value
+
+    row = extract.extract_workbook(save_workbook(wb, tmp_path / "sheet1-csk-dtna.xlsx"), infer_manual=True)
+
+    assert row.values[21] == 20
+    assert row.values[20] == 20
+
+
+def test_sheet1_csk_dyna_tube_counts_four_parts_per_quantity(tmp_path: Path) -> None:
+    wb = sheet1_profile_book()
+    ws = wb["Sheet1"]
+    ws.cell(10, 6).value = "CSK"
+    ws.cell(11, 6).value = "DYNA AND TUBE"
+    values = [1, "Split 180B/O (35 Door)", 2060, 923, "RIGHT", "10 (5 EACH SIDE)", "", "", 1000, ""]
+    for col, value in enumerate(values, start=1):
+        ws.cell(13, col).value = value
+
+    row = extract.extract_workbook(save_workbook(wb, tmp_path / "sheet1-csk-dyna-tube.xlsx"), infer_manual=True)
+
+    assert row.values[21] == 40
+    assert row.values[20] == 40
+
+
+def test_sheet1_tradition_dyna_counts_one_part_per_quantity(tmp_path: Path) -> None:
+    wb = sheet1_profile_book()
+    ws = wb["Sheet1"]
+    ws.cell(10, 6).value = "TRADITION"
+    ws.cell(11, 6).value = "DYNA"
+    values = [1, "Split 180B/O (35 Door)", 2060, 923, "RIGHT", "10 (5 EACH SIDE)", "", "", 1000, ""]
+    for col, value in enumerate(values, start=1):
+        ws.cell(13, col).value = value
+
+    row = extract.extract_workbook(save_workbook(wb, tmp_path / "sheet1-tradition-dyna.xlsx"), infer_manual=True)
+
+    assert row.values[21] == 10
+    assert row.values[20] == 10
+
+
 def test_sheet1_hinge_plates_quantity_goes_to_w_bucket(tmp_path: Path) -> None:
     wb = sheet1_profile_book()
     ws = wb["Sheet1"]
