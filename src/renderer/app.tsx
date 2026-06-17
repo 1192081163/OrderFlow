@@ -242,7 +242,7 @@ function App() {
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       appendLog(`失败：${messageText}`);
-      setResultFailures([{ path: "处理任务", error: messageText }]);
+      setResultFailures([{ path: "订单提取", error: messageText }]);
       setSummary(messageText);
     } finally {
       setBusy(false);
@@ -252,7 +252,7 @@ function App() {
   function resetResult(): void {
     setLatestOutputs(null);
     setProgress(0);
-    setSummary("正在处理");
+    setSummary("正在提取订单");
     setResultFailures([]);
     setLogLines([]);
   }
@@ -610,7 +610,7 @@ function App() {
             <Card className="surface result-panel">
               <div className="result-header">
                 <div>
-                  <div className="section-title">处理结果</div>
+                  <div className="section-title">订单提取结果</div>
                   <div id="summaryText" className="summary">
                     {summary}
                   </div>
@@ -658,7 +658,7 @@ function renderProgress(
 ): void {
   const percent = event.total === 0 ? 0 : Math.round((event.index / event.total) * 100);
   setProgress(percent);
-  const label = event.status === "running" ? "正在处理" : event.status === "completed" ? "完成" : "失败";
+  const label = event.status === "running" ? "正在提取" : event.status === "completed" ? "完成" : "失败";
   appendLog(`[${event.index}/${event.total}] ${label} ${event.filename}`);
 }
 

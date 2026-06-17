@@ -60,6 +60,8 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("npm run dist:win:ci");
     expect(workflow).toContain('tag="build-${GITHUB_RUN_NUMBER}"');
     expect(workflow).toContain("gh release create");
+    expect(workflow).toContain("Windows 安装包已自动生成");
+    expect(workflow).toContain("直接下载 order-organizer-assistant-windows.exe");
     expect(workflow).toContain("--latest");
     expect(workflow).not.toContain("npm run dist:mac");
     expect(workflow).not.toContain("build-macos");

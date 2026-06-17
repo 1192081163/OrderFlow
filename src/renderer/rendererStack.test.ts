@@ -56,6 +56,10 @@ describe("renderer React stack", () => {
     expect(appSource).toContain("提取选中 ${selectedExtractableUids.length} 封");
     expect(appSource).toContain("失败原因");
     expect(appSource).toContain("resultFailures");
+    expect(appSource).toContain("订单提取结果");
+    expect(appSource).toContain("订单提取");
+    expect(appSource).not.toContain("处理结果");
+    expect(appSource).not.toContain("处理任务");
     expect(appSource).toContain("loadExtractedMessageUids");
     expect(appSource).toContain("mergeExtractedMessageUids");
     expect(appSource).toContain("window.localStorage");

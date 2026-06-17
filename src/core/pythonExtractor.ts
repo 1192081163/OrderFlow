@@ -31,7 +31,7 @@ export async function runPythonOrderExtraction(
 
   try {
     const { stdout } = await execFileAsync(command.command, args, {
-      cwd: projectRoot(),
+      cwd: resolvePythonExecutionCwd(command.command),
       maxBuffer: 50 * 1024 * 1024,
     });
     return JSON.parse(stdout) as ExtractionResult;
@@ -57,6 +57,17 @@ function resolvePythonCommand(): PythonCommand {
     return { command: "py", argsPrefix: ["-3", scriptPath] };
   }
   return { command: "python3", argsPrefix: [scriptPath] };
+}
+
+export function resolvePythonExecutionCwd(
+  _command: string,
+  root = projectRoot(),
+  resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath,
+): string {
+  if (!root.toLowerCase().replaceAll("\\", "/").includes("/app.asar")) {
+    return root;
+  }
+  return resourcesPath?.trim() || path.dirname(root);
 }
 
 function findBundledRunner(): string | null {

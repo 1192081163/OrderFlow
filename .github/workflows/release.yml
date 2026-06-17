@@ -110,6 +110,6 @@ jobs:
           gh release create "$tag" \
             "release-assets/${{ env.ASSET_BASENAME }}-windows.exe#${{ env.ASSET_BASENAME }}-windows.exe" \
             --title "订单整理助手 ${tag}" \
-            --notes "Windows: download ${{ env.ASSET_BASENAME }}-windows.exe and double-click to install." \
+            --notes "Windows 安装包已自动生成。直接下载 order-organizer-assistant-windows.exe，双击安装即可使用。" \
             --target "$GITHUB_SHA" \
             --latest

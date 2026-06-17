@@ -4,7 +4,7 @@ import path from "node:path";
 import ExcelJS from "exceljs";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-import { runPythonOrderExtraction } from "./pythonExtractor.js";
+import { resolvePythonExecutionCwd, runPythonOrderExtraction } from "./pythonExtractor.js";
 
 let tempRoot = "";
 
@@ -33,6 +33,20 @@ async function makeWorksheetOrder(filePath: string): Promise<void> {
 }
 
 describe("python order extraction bridge", () => {
+  test("uses real resources directory instead of app.asar as packaged cwd", () => {
+    const resourcesPath = path.join(tempRoot, "resources");
+    const asarRoot = path.join(resourcesPath, "app.asar");
+    const runnerPath = path.join(resourcesPath, "python-helper", "order-python-runner.exe");
+
+    expect(resolvePythonExecutionCwd(runnerPath, asarRoot, resourcesPath)).toBe(resourcesPath);
+  });
+
+  test("keeps project root as cwd during development", () => {
+    const runnerPath = path.join(tempRoot, "python-helper", "order-python-runner.exe");
+
+    expect(resolvePythonExecutionCwd(runnerPath, tempRoot)).toBe(tempRoot);
+  });
+
   test("runs the Python rules and returns generated outputs", async () => {
     const filePath = path.join(tempRoot, "29698 python bridge.xlsx");
     await makeWorksheetOrder(filePath);

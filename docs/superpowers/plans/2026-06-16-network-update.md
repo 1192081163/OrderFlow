@@ -43,8 +43,8 @@ def test_compare_versions_handles_v_prefix_and_numeric_parts():
 def test_choose_asset_selects_current_platform_package():
     release = {
         "assets": [
-            {"name": "order-extraction-tool-windows.exe", "browser_download_url": "https://example/win.exe"},
-            {"name": "order-extraction-tool-macos.dmg", "browser_download_url": "https://example/mac.dmg"},
+            {"name": "order-organizer-assistant-windows.exe", "browser_download_url": "https://example/win.exe"},
+            {"name": "order-organizer-assistant-macos.dmg", "browser_download_url": "https://example/mac.dmg"},
         ]
     }
     assert choose_asset(release, CURRENT_PLATFORM_ASSET)["name"] == CURRENT_PLATFORM_ASSET
@@ -168,4 +168,4 @@ Expected: DMG is created and smoke test prints `订单提取工具`.
 
 - [ ] **Step 4: Commit and release**
 
-Commit the code, push `main`, force-update `v1.0.0`, and verify GitHub Actions publishes `order-extraction-tool-windows.exe` and `order-extraction-tool-macos.dmg`.
+Commit the code, push `main`, and verify GitHub Actions publishes `order-organizer-assistant-windows.exe` as the direct Windows installer.

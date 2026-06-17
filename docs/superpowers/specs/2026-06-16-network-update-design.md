@@ -9,8 +9,8 @@ Add an online update check to the desktop order extraction tool. The app should 
 - The app checks for updates shortly after startup.
 - A `检查更新` button lets the user manually check at any time.
 - If an update is available, the app shows the current version, the latest version, and asks whether to open the matching download.
-- Windows users get `order-extraction-tool-windows.exe`.
-- macOS users get `order-extraction-tool-macos.dmg`.
+- Windows users get `order-organizer-assistant-windows.exe`.
+- macOS packages are not published in the current release workflow.
 - Network errors, GitHub rate limits, or missing assets do not interrupt extraction. Manual checks show the error; automatic checks fail quietly.
 
 ## Update Semantics
