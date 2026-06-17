@@ -342,6 +342,11 @@ export async function runOrderExtraction(paths: string[], options: RunExtraction
     options.progress?.({ index: index + 1, total, filename: path.basename(filePath), status: "running" });
     try {
       const row = await extractWorkbook(filePath, { inferManual: options.inferManual ?? false });
+      if (!isExtractedOrderRow(row)) {
+        resolution.skippedFiles.push(path.basename(filePath));
+        options.progress?.({ index: index + 1, total, filename: path.basename(filePath), status: "completed" });
+        continue;
+      }
       const fileStat = await stat(filePath);
       rowEntries.push({ index, filePath, mtimeMs: fileStat.mtimeMs, row });
     } catch (error) {
@@ -365,6 +370,23 @@ export async function runOrderExtraction(paths: string[], options: RunExtraction
     failures,
     outputs,
   };
+}
+
+export function isExtractedOrderRow(row: ExtractedOrderRow): boolean {
+  const hasIdentifier = [1, 2, 6].some((index) => hasRowValue(row.values[index]));
+  const hasDeadline = hasRowValue(row.values[14]);
+  const hasDetail = [9, 10, 11, 12, 13, 19, 20, 21, 22, 23].some((index) => hasRowValue(row.values[index]));
+  const hasOnlyUnsupportedLayoutNote =
+    row.manualCheck.length > 0 && row.manualCheck.every((note) => note.startsWith("unsupported workbook layout"));
+
+  if (hasOnlyUnsupportedLayoutNote && row.values.every((value) => !hasRowValue(value))) {
+    return false;
+  }
+  return hasIdentifier && (hasDeadline || hasDetail);
+}
+
+function hasRowValue(value: string | number | null): boolean {
+  return value !== null && String(value).trim() !== "";
 }
 
 function dedupeLatestRows(entries: ExtractedRowEntry[]): ExtractedOrderRow[] {
@@ -506,16 +528,16 @@ function extractSheetAddress(worksheet: ExcelJS.Worksheet): { zone: string; addr
     return { zone: "", address: "" };
   }
   if (values.length >= 2 && /^\d{2}[A-Za-z]$/.test(values[0])) {
-    return { zone: values[0], address: values[1] };
+    return { zone: normalizeZone(values[0]) ?? "", address: values[1] };
   }
   return splitZoneAndAddress(values[0]);
 }
 
 function splitZoneAndAddress(text: string): { zone: string; address: string } {
   const cleaned = cleanText(text);
-  const match = cleaned.match(/^(\d{2}[A-Za-z])\s*-\s*(.+)$/);
+  const match = cleaned.match(/^(\d{2}[A-Za-z])(?:\s*[-,]\s*|\s+)(.+)$/);
   if (match) {
-    return { zone: match[1], address: match[2] };
+    return { zone: normalizeZone(match[1]) ?? "", address: match[2] };
   }
   return { zone: "", address: cleaned };
 }

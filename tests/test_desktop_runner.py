@@ -14,6 +14,16 @@ def make_workbook(path: Path) -> None:
     wb.save(path)
 
 
+def make_non_order_excel(path: Path) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Report"
+    ws["A1"] = "普通报表"
+    ws["A2"] = "不是订单"
+    ws["B2"] = "2026-06-15"
+    wb.save(path)
+
+
 def make_order_workbook(path: Path, job: str) -> None:
     wb = Workbook()
     ws = wb.active
@@ -101,3 +111,16 @@ def test_run_extraction_keeps_latest_source_version_for_duplicate_jobs(tmp_path:
 
     assert len(result.rows) == 1
     assert result.rows[0].source_file == newer.name
+
+
+def test_run_extraction_skips_excel_files_without_order_rules(tmp_path: Path) -> None:
+    order = tmp_path / "29698 order.xlsx"
+    report = tmp_path / "weekly report.xlsx"
+    make_order_workbook(order, "29698")
+    make_non_order_excel(report)
+
+    result = run_extraction([tmp_path])
+
+    assert len(result.rows) == 1
+    assert result.rows[0].source_file == order.name
+    assert report.name in result.skipped_files

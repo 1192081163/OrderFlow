@@ -42,6 +42,15 @@ async function makeWorksheetOrder(filePath: string): Promise<void> {
   await wb.xlsx.writeFile(filePath);
 }
 
+async function makeNonOrderWorkbook(filePath: string): Promise<void> {
+ const wb = new ExcelJS.Workbook();
+ const ws = wb.addWorksheet("Report");
+ ws.getCell("A1").value = "普通报表";
+ ws.getCell("A2").value = "不是订单";
+ ws.getCell("B2").value = "2026-06-15";
+ await wb.xlsx.writeFile(filePath);
+}
+
 async function makeWorksheetOrderWithFields(
   filePath: string,
   fields: {
@@ -757,7 +766,7 @@ async function makeSheet1ProfileOrder(filePath: string): Promise<void> {
   await wb.xlsx.writeFile(filePath);
 }
 
-async function makeSheet1AddressOrder(filePath: string): Promise<void> {
+async function makeSheet1AddressOrder(filePath: string, deliveryAddress = "12a - pickup"): Promise<void> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Sheet1");
   ws.getCell("A1").value = "Job # 29698";
@@ -768,7 +777,7 @@ async function makeSheet1AddressOrder(filePath: string): Promise<void> {
   ws.getCell("A4").value = "Delivery Date";
   ws.getCell("B4").value = "2026-06-02";
   ws.getCell("A5").value = "Delivery Address";
-  ws.getCell("B5").value = "12a - pickup";
+  ws.getCell("B5").value = deliveryAddress;
   ws.getCell("A6").value = "Material";
   ws.getCell("B6").value = "1.05mm Zincanneal";
   ["Qty", "Profile", "Hand", "Hinge Qty", "Striker Type", "Sill"].forEach((value, index) => {
@@ -1890,7 +1899,20 @@ describe("runOrderExtraction", () => {
     expect(result.rows[0].values[16]).toBe("Friday");
   });
 
-  test("deduplicates duplicate jobs by highest source version", async () => {
+ test("skips Excel files without order content", async () => {
+ const orderPath = path.join(tempRoot, "29698 order.xlsx");
+ const reportPath = path.join(tempRoot, "weekly report.xlsx");
+ await makeWorksheetOrder(orderPath);
+ await makeNonOrderWorkbook(reportPath);
+
+ const result = await runOrderExtraction([orderPath, reportPath]);
+
+ expect(result.rows).toHaveLength(1);
+ expect(result.rows[0].sourceFile).toBe("29698 order.xlsx");
+ expect(result.skippedFiles).toContain("weekly report.xlsx");
+ });
+
+ test("deduplicates duplicate jobs by highest source version", async () => {
     const olderPath = path.join(tempRoot, "29698__0178__old.xlsx");
     const newerPath = path.join(tempRoot, "29698__0216__new.xlsx");
     await makeWorksheetOrderWithFields(olderPath, { po: "OLD" });
@@ -1916,5 +1938,21 @@ describe("runOrderExtraction", () => {
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].sourceFile).toBe("29698 newer.xlsx");
     expect(result.rows[0].values[1]).toBe("NEW");
+  });
+
+  test("splits Sheet1 zone prefix from delivery address in the same cell", async () => {
+    const cases = [
+      ["42b 28 SIGNAL TCE, COCKBURN TCE", "42B", "28 SIGNAL TCE, COCKBURN TCE"],
+      ["03C, 62 CLAYTON STREET BELLEVUE", "03C", "62 CLAYTON STREET BELLEVUE"],
+    ];
+
+    for (const [deliveryAddress, expectedZone, expectedAddress] of cases) {
+      const filePath = path.join(tempRoot, `${expectedZone} sheet1 address.xlsx`);
+      await makeSheet1AddressOrder(filePath, deliveryAddress);
+      const row = await extractWorkbook(filePath, { inferManual: true });
+
+      expect(row.values[4]).toBe(expectedZone);
+      expect(row.values[5]).toBe(expectedAddress);
+    }
   });
 });

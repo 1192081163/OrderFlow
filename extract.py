@@ -1314,9 +1314,9 @@ def sheet1_label_value(ws: Any, labels: set[str], max_right: int = 4) -> Any:
 
 def split_zone_and_address(value: Any) -> tuple[str | None, str | None]:
     text = clean_text(value)
-    match = re.match(r"^(\d{2}[A-Za-z])\s*-\s*(.+)$", text)
+    match = re.match(r"^(\d{2}[A-Za-z])(?:\s*[-,]\s*|\s+)(.+)$", text)
     if match:
-        return match.group(1), match.group(2)
+        return normalize_zone(match.group(1)), match.group(2)
     return None, text or None
 
 
@@ -1333,7 +1333,7 @@ def extract_sheet1_address(ws: Any) -> tuple[str | None, str | None]:
     if not values:
         return None, None
     if len(values) >= 2 and re.fullmatch(r"\d{2}[A-Za-z]", values[0]):
-        return values[0], values[1]
+        return normalize_zone(values[0]), values[1]
     zone, address = split_zone_and_address(values[0])
     if zone or address:
         return zone, address
@@ -1941,6 +1941,23 @@ def write_csv(rows: list[ExtractedRow], output: Path) -> None:
         writer.writerow(TRACK_HEADERS)
         for row in rows:
             writer.writerow(row.values)
+
+
+def is_order_row(row: ExtractedRow) -> bool:
+    """Return True only when a parsed workbook contains real order content."""
+    has_identifier = any(has_cell_value(row.values[index]) for index in (1, 2, 6))
+    has_deadline = has_cell_value(row.values[14])
+    has_detail = any(has_cell_value(row.values[index]) for index in (9, 10, 11, 12, 13, 19, 20, 21, 22, 23))
+    has_only_unsupported_layout_note = bool(row.manual_check) and all(
+        note.startswith("unsupported workbook layout") for note in row.manual_check
+    )
+    if has_only_unsupported_layout_note and not any(has_cell_value(value) for value in row.values):
+        return False
+    return has_identifier and (has_deadline or has_detail)
+
+
+def has_cell_value(value: Any) -> bool:
+    return value is not None and clean_text(value) != ""
 
 
 def write_xlsx(rows: list[ExtractedRow], output: Path, input_dir: Path, input_files: list[Path]) -> None:

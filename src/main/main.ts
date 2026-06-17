@@ -18,7 +18,7 @@ async function createWindow(): Promise<void> {
     title: "订单提取助手",
     backgroundColor: "#f5f6f8",
     webPreferences: {
-      preload: path.join(__dirname, "../preload/preload.js"),
+      preload: path.join(__dirname, "../preload/preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
     },

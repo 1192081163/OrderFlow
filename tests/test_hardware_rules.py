@@ -393,6 +393,26 @@ def sheet1_profile_book() -> Workbook:
     return wb
 
 
+def test_sheet1_delivery_address_splits_zone_prefix_from_same_cell(tmp_path: Path) -> None:
+    cases = [
+        ("42b 28 SIGNAL TCE, COCKBURN TCE", "42B", "28 SIGNAL TCE, COCKBURN TCE"),
+        ("03C, 62 CLAYTON STREET BELLEVUE", "03C", "62 CLAYTON STREET BELLEVUE"),
+    ]
+
+    for raw_address, expected_zone, expected_address in cases:
+        wb = sheet1_profile_book()
+        ws = wb["Sheet1"]
+        ws["A5"] = "Delivery Address"
+        ws["B5"] = raw_address
+        ws.cell(13, 1).value = 1
+        ws.cell(13, 2).value = "Modern"
+
+        row = extract.extract_workbook(save_workbook(wb, tmp_path / f"{expected_zone}.xlsx"), infer_manual=True)
+
+        assert row.values[4] == expected_zone
+        assert row.values[5] == expected_address
+
+
 def test_sheet1_hinges_quantity_goes_to_v_bucket(tmp_path: Path) -> None:
     wb = sheet1_profile_book()
     ws = wb["Sheet1"]

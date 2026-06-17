@@ -70,3 +70,35 @@ export interface ImapConfig extends EmailSettings {
   server: string;
   port: number;
 }
+
+export interface EmailMessageSummary {
+  uid: string;
+  subject: string;
+  from?: string;
+  date?: string;
+  attachmentCount: number;
+  excelAttachmentNames: string[];
+  hasExcelAttachments: boolean;
+}
+
+export interface EmailListResult {
+  messages: EmailMessageSummary[];
+  scannedMessages: number;
+  days: number;
+}
+
+export interface NewOrderEmailNotification {
+  title: string;
+  body: string;
+}
+
+export interface UpdateCheckResult {
+  updateAvailable: boolean;
+  currentVersion: string;
+  latestVersion?: string;
+  releaseUrl?: string;
+  downloadUrl?: string;
+  assetName?: string;
+  reason: "current" | "newer_version" | "missing_asset" | "error";
+  error?: string;
+}

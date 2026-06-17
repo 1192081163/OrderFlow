@@ -125,7 +125,11 @@ def run_extraction(
         if progress:
             progress(index, total, path, "running")
         try:
-            rows.append(extract.extract_workbook(path, infer_manual=infer_manual))
+            row = extract.extract_workbook(path, infer_manual=infer_manual)
+            if extract.is_order_row(row):
+                rows.append(row)
+            else:
+                resolution.skipped_files.append(path.name)
         except Exception as exc:
             failures.append(ExtractionFailure(path=path, error=str(exc)))
             if progress:

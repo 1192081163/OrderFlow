@@ -1,8 +1,15 @@
-import { BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, Notification, dialog, ipcMain, shell } from "electron";
 
-import { extractEmailOrders, extractLocalOrders, type EmailExtractionRequest } from "../core/extractionService.js";
+import {
+  extractEmailOrders,
+  extractLocalOrders,
+  listEmailMessages,
+  type EmailExtractionRequest,
+  type EmailListRequest,
+} from "../core/extractionService.js";
 import { loadEmailSettings, saveEmailSettings } from "../core/settings.js";
-import type { EmailSettings, ProgressEvent } from "../shared/types.js";
+import { checkForUpdates } from "../core/updateChecker.js";
+import type { EmailSettings, NewOrderEmailNotification, ProgressEvent } from "../shared/types.js";
 
 interface LocalExtractionPayload {
   paths?: string[];
@@ -17,6 +24,8 @@ export function registerIpcHandlers(): void {
     await saveEmailSettings(settings);
     return loadEmailSettings();
   });
+
+  ipcMain.handle("updates:check", async () => checkForUpdates());
 
   ipcMain.handle("dialog:select-files", async (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
@@ -38,6 +47,12 @@ export function registerIpcHandlers(): void {
     const result = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
     return result.canceled ? [] : result.filePaths;
   });
+
+  ipcMain.handle("emails:list", async (_event, payload: EmailListRequest) => listEmailMessages(payload));
+
+  ipcMain.handle("notifications:new-order-emails", async (event, notification: NewOrderEmailNotification) =>
+    showNewOrderEmailNotification(event.sender, notification),
+  );
 
   ipcMain.handle("orders:extract-local", async (event, payload: LocalExtractionPayload) =>
     extractLocalOrders(
@@ -69,4 +84,31 @@ function sendProgress(sender: Electron.WebContents): (event: ProgressEvent) => v
   return (event) => {
     sender.send("orders:progress", event);
   };
+}
+
+function showNewOrderEmailNotification(sender: Electron.WebContents, notification: NewOrderEmailNotification): boolean {
+  if (!Notification.isSupported()) {
+    return false;
+  }
+
+  const window = BrowserWindow.fromWebContents(sender);
+  const nativeNotification = new Notification({
+    title: notification.title.trim() || "发现新订单邮件",
+    body: notification.body.trim() || "有新的订单邮件待提取。",
+    silent: false,
+  });
+
+  nativeNotification.on("click", () => {
+    if (!window) {
+      return;
+    }
+    if (window.isMinimized()) {
+      window.restore();
+    }
+    window.show();
+    window.focus();
+  });
+  nativeNotification.show();
+  window?.flashFrame(true);
+  return true;
 }

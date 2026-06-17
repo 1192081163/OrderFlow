@@ -4,11 +4,12 @@ import {
   DEFAULT_IMAP_PORT,
   DEFAULT_IMAP_SERVER,
   fetchEmailOrderFiles,
+  listRecentEmailMessages,
   type EmailFetchResult,
 } from "./emailSource.js";
 import { runPythonOrderExtraction, type OrderExtractionRunner } from "./pythonExtractor.js";
 import { defaultEmailDownloadRoot } from "./settings.js";
-import type { EmailSettings, ExtractionResult, ImapConfig, ProgressEvent } from "../shared/types.js";
+import type { EmailListResult, ExtractionResult, ImapConfig, ProgressEvent } from "../shared/types.js";
 
 export interface LocalExtractionRequest {
   paths: string[];
@@ -16,14 +17,22 @@ export interface LocalExtractionRequest {
   inferManual?: boolean;
 }
 
-export interface EmailExtractionRequest {
+export interface EmailConnectionRequest {
   email: string;
   authCode: string;
   server?: string;
   port?: number;
+}
+
+export interface EmailExtractionRequest extends EmailConnectionRequest {
   inferManual?: boolean;
   hours?: number;
+  messageUids?: string[];
   downloadDir?: string;
+}
+
+export interface EmailListRequest extends EmailConnectionRequest {
+  days?: number;
 }
 
 export interface EmailExtractionResult {
@@ -38,6 +47,11 @@ export interface LocalExtractionDependencies {
 export interface EmailExtractionDependencies {
   fetchEmailOrderFiles?: typeof fetchEmailOrderFiles;
   runOrderExtraction?: OrderExtractionRunner;
+  now?: () => Date;
+}
+
+export interface EmailListDependencies {
+  listRecentEmailMessages?: typeof listRecentEmailMessages;
   now?: () => Date;
 }
 
@@ -68,7 +82,10 @@ export async function extractEmailOrders(
   const fetcher = dependencies.fetchEmailOrderFiles ?? fetchEmailOrderFiles;
   const extractor = dependencies.runOrderExtraction ?? runPythonOrderExtraction;
   const downloadDir = request.downloadDir ?? timestampedDownloadDir(dependencies.now?.() ?? new Date());
-  const emailFetch = await fetcher(config, downloadDir, { hours: request.hours });
+  const emailFetch = await fetcher(config, downloadDir, {
+    hours: request.hours,
+    messageUids: request.messageUids,
+  });
   const extraction = await extractor(emailFetch.files, {
     recursive: false,
     inferManual: request.inferManual ?? true,
@@ -78,7 +95,19 @@ export async function extractEmailOrders(
   return { emailFetch, extraction };
 }
 
-export function buildImapConfig(settings: EmailSettings & Partial<Pick<ImapConfig, "server" | "port">>): ImapConfig {
+export async function listEmailMessages(
+  request: EmailListRequest,
+  dependencies: EmailListDependencies = {},
+): Promise<EmailListResult> {
+  const config = buildImapConfig(request);
+  const lister = dependencies.listRecentEmailMessages ?? listRecentEmailMessages;
+  return lister(config, {
+    days: request.days ?? 7,
+    now: dependencies.now?.(),
+  });
+}
+
+export function buildImapConfig(settings: EmailConnectionRequest): ImapConfig {
   const email = settings.email.trim();
   const authCode = settings.authCode.trim();
   if (!email || !authCode) {
