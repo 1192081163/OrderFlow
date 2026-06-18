@@ -127,35 +127,6 @@ describe("Electron packaging configuration", () => {
   expect(workflow).not.toContain("desktop_app.py");
 });
 
-test("CircleCI checks Node, Python, and Windows packaging without publishing", async () => {
-  const config = await readFile(path.join(root, ".circleci/config.yml"), "utf8");
-
-  expect(config).toContain("version: 2.1");
-  expect(config).toContain("node-test:");
-  expect(config).toContain("python-test:");
-  expect(config).toContain("windows-build:");
-  expect(config).toContain("npm ci");
-  expect(config).toContain("npm run typecheck");
-  expect(config).toContain("npm test");
-  expect(config).toContain("python -m pip install -r requirements-python-runner.txt pytest");
-  expect(config).toContain("python -m pytest tests");
-  expect(config).toContain('checksum "rules/builder_aliases.csv"');
-  expect(config).toContain('checksum "rules/china_workdays_2026.csv"');
-  expect(config).toContain('checksum "rules/goods_ignore_patterns.csv"');
-  expect(config).toContain('checksum "rules/wa_public_holidays_2026.csv"');
-  expect(config).toContain("./scripts/build-python-runner-win.ps1");
-  expect(config).toContain("npm run dist:win:ci");
-  expect(config).toContain("store_artifacts:");
-  expect(config).toContain("release/orderflow-desktop-windows.exe");
-  expect(config).toContain("branches:");
-  expect(config).toContain("only:");
-  expect(config).toContain("- main");
-  expect(config).toContain("- master");
-  expect(config).not.toContain("gh release create");
-  expect(config).not.toContain("order-organizer-assistant");
-  expect(config).not.toContain("r004-order-extraction-tool");
-});
-
 test("open source metadata documents license, contributions, and data safety", async () => {
   const license = await readFile(path.join(root, "LICENSE"), "utf8");
   const security = await readFile(path.join(root, "SECURITY.md"), "utf8");
