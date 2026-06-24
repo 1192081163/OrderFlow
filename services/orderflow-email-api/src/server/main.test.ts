@@ -59,6 +59,45 @@ describe("standalone email API entrypoint", () => {
       },
     ]);
   });
+
+  test("broadcasts new default mailbox messages after background refresh", async () => {
+    let calls = 0;
+    activeServer = await startEmailApiServer({
+      config: { ...testConfig(), cacheRefreshMs: 20 },
+      listEmailMessages: async (request) => {
+        calls += 1;
+        return {
+          days: request.days ?? 0,
+          scannedMessages: calls,
+          orderAttachmentCount: calls,
+          nonOrderExcelAttachmentCount: 0,
+          messages: [
+            {
+              uid: `uid-${calls}`,
+              subject: `PO ${calls}`,
+              attachmentCount: 1,
+              excelAttachmentNames: [`order-${calls}.xlsx`],
+              hasExcelAttachments: true,
+            },
+          ],
+        };
+      },
+    });
+    await waitFor(() => calls === 1);
+
+    const controller = new AbortController();
+    const response = await fetch(`${serverUrl(activeServer)}/api/email/events`, {
+      headers: { authorization: "Bearer token" },
+      signal: controller.signal,
+    });
+    expect(response.status).toBe(200);
+
+    try {
+      await expect(readNextSseEvent(response)).resolves.toContain('"uid":"uid-2"');
+    } finally {
+      controller.abort();
+    }
+  });
 });
 
 function testConfig(): EmailApiConfig {
@@ -94,6 +133,40 @@ async function requestJson(server: Server, path: string, body: unknown, token: s
     status: response.status,
     body: JSON.parse(await response.text()),
   };
+}
+
+function serverUrl(server: Server): string {
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Test server did not bind to TCP port.");
+  }
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function readNextSseEvent(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Response body is not readable.");
+  }
+  const decoder = new TextDecoder();
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    text += decoder.decode(value, { stream: true });
+    const eventEnd = text.indexOf("\n\n");
+    if (eventEnd === -1) {
+      continue;
+    }
+    const eventText = text.slice(0, eventEnd + 2);
+    if (!eventText.startsWith(":")) {
+      return eventText;
+    }
+    text = text.slice(eventEnd + 2);
+  }
+  return text;
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {

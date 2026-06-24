@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -98,6 +98,41 @@ describe("remote email API client", () => {
     });
   });
 
+  test("streams new-message events from remote event endpoint", async () => {
+    const received: Array<{ url?: string; authorization?: string }> = [];
+    const baseUrl = await listenWithRawHandler((request, response) => {
+      received.push({
+        url: request.url,
+        authorization: headerValue(request.headers.authorization),
+      });
+      response.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8" });
+      response.write(": connected\n\n");
+      response.end(
+        `event: new-messages\ndata: ${JSON.stringify({
+          email: "orders@example.com",
+          days: 7,
+          messages: [
+            {
+              uid: "101",
+              subject: "PO 101",
+              attachmentCount: 1,
+              excelAttachmentNames: ["order.xlsx"],
+              hasExcelAttachments: true,
+            },
+          ],
+        })}\n\n`,
+      );
+    });
+
+    const client = new RemoteEmailApiClient({ baseUrl, token: "api-token" });
+    const events: Array<{ email: string; messages: Array<{ uid: string }> }> = [];
+    await client.subscribeNewMessages((event) => events.push(event));
+
+    expect(received).toEqual([{ url: "/api/email/events", authorization: "Bearer api-token" }]);
+    expect(events[0]?.email).toBe("orders@example.com");
+    expect(events[0]?.messages[0]?.uid).toBe("101");
+  });
+
   test("loads hidden remote API settings from environment or local config file", async () => {
     const settingsPath = path.join(tmpdir(), `remote-email-api-${process.pid}.json`);
 
@@ -168,6 +203,16 @@ async function listenWithJsonHandler(handler: (request: { url?: string; headers:
   const address = activeServer.address();
   if (!address || typeof address === "string") {
     throw new Error("Test server did not bind to a TCP port.");
+  }
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function listenWithRawHandler(handler: (request: IncomingMessage, response: ServerResponse) => void): Promise<string> {
+  activeServer = createServer(handler);
+  await new Promise<void>((resolve) => activeServer?.listen(0, "127.0.0.1", resolve));
+  const address = activeServer.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Test server did not bind to TCP port.");
   }
   return `http://127.0.0.1:${address.port}`;
 }

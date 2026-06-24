@@ -16,7 +16,14 @@ import { createRoot } from "react-dom/client";
 
 import type { EmailExtractionResult } from "../core/extractionService.js";
 import type { OrderOrganizerApi } from "../preload/preload.cjs";
-import type { EmailMessageSummary, ExtractionFailure, ExtractionResult, OutputPaths, ProgressEvent } from "../shared/types.js";
+import type {
+  EmailMessageSummary,
+  EmailNewMessagesEvent,
+  ExtractionFailure,
+  ExtractionResult,
+  OutputPaths,
+  ProgressEvent,
+} from "../shared/types.js";
 import {
   buildNewOrderEmailNotification,
   findNewPendingOrderMessages,
@@ -65,6 +72,8 @@ function App() {
   const seenMessageUids = useRef<Set<string>>(new Set());
   const hasLoadedMailbox = useRef(false);
   const mailboxKey = useRef("");
+  const emailMessagesRef = useRef<EmailMessageSummary[]>([]);
+  const extractedMessageUidsRef = useRef<Set<string>>(new Set());
 
   const canUseEmail = Boolean(email.trim() && authCode.trim() && !bridgeMissing);
   const visibleEmailMessages = useMemo(
@@ -97,6 +106,14 @@ function App() {
     const stamp = new Date().toLocaleTimeString("zh-CN", { hour12: false });
     setLogLines((current) => [...current, `[${stamp}] ${line}`].slice(-200));
   }, []);
+
+  useEffect(() => {
+    emailMessagesRef.current = emailMessages;
+  }, [emailMessages]);
+
+  useEffect(() => {
+    extractedMessageUidsRef.current = extractedMessageUids;
+  }, [extractedMessageUids]);
 
   const refreshEmails = useCallback(
     async (mode: "manual" | "auto" = "manual", override?: { email: string; authCode: string }): Promise<void> => {
@@ -196,6 +213,47 @@ function App() {
     [appendLog, authCode, email, extractedMessageUids],
   );
 
+  const handleEmailUpdate = useCallback(
+    (event: EmailNewMessagesEvent): void => {
+      const currentEmail = email.trim().toLowerCase();
+      if (!currentEmail || event.email.trim().toLowerCase() !== currentEmail) {
+        return;
+      }
+
+      const currentMessages = emailMessagesRef.current;
+      const extractedUids = extractedMessageUidsRef.current;
+      const currentUids = new Set(currentMessages.map((message) => message.uid));
+      const incomingMessages = sortMessages(event.messages);
+      const newPendingMessages = incomingMessages.filter(
+        (message) => !currentUids.has(message.uid) && message.hasExcelAttachments && !extractedUids.has(message.uid),
+      );
+      if (newPendingMessages.length === 0) {
+        return;
+      }
+
+      seenMessageUids.current = mergeSeenMessageUids(seenMessageUids.current, newPendingMessages);
+      hasLoadedMailbox.current = true;
+      setEmailMessages((current) => {
+        const incomingUids = new Set(incomingMessages.map((message) => message.uid));
+        return sortMessages([...incomingMessages, ...current.filter((message) => !incomingUids.has(message.uid))]);
+      });
+      setNewMessageUids((current) => {
+        const next = new Set(current);
+        newPendingMessages.forEach((message) => next.add(message.uid));
+        return next;
+      });
+      setMailStatus(`服务器推送 ${newPendingMessages.length} 封新候选邮件`);
+      appendLog(`服务器推送新候选邮件：${newPendingMessages.map((message) => message.subject || "(无主题)").join(" / ")}`);
+
+      const notification = buildNewOrderEmailNotification(newPendingMessages);
+      void api.notifyNewOrderEmails(notification).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        appendLog(`系统通知失败：${message}`);
+      });
+    },
+    [appendLog, email],
+  );
+
   useEffect(() => {
     const removeProgressListener = api.onProgress((event) => renderProgress(event, appendLog, setProgress));
     void api.loadSettings().then((settings) => {
@@ -214,6 +272,24 @@ function App() {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [logLines]);
+
+  useEffect(() => {
+    if (!canUseEmail) {
+      return;
+    }
+
+    const removeEmailUpdateListener = api.onEmailUpdate(handleEmailUpdate);
+    void api.subscribeEmailUpdates().then((subscribed) => {
+      if (subscribed) {
+        appendLog("服务器实时邮件提醒已连接");
+      }
+    });
+
+    return () => {
+      removeEmailUpdateListener();
+      void api.unsubscribeEmailUpdates();
+    };
+  }, [appendLog, canUseEmail, handleEmailUpdate]);
 
   useEffect(() => {
     if (!canUseEmail) {
@@ -807,6 +883,9 @@ function createPreviewApi(): OrderOrganizerApi {
       extraction,
     }),
     notifyNewOrderEmails: async () => false,
+    subscribeEmailUpdates: async () => false,
+    unsubscribeEmailUpdates: async () => true,
+    onEmailUpdate: () => () => undefined,
     checkUpdates: async () => ({
       updateAvailable: false,
       currentVersion: "preview",

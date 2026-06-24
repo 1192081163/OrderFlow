@@ -14,12 +14,14 @@ import {
 } from "../core/extractionService.js";
 import type { EmailListResult, ExtractionResult } from "../shared/types.js";
 import type { EmailApiConfig } from "./emailApiConfig.js";
+import type { EmailEventHub } from "./emailEventHub.js";
 
 export interface EmailApiServerDependencies {
   config: EmailApiConfig;
   listEmailMessages?: (request: EmailListRequest) => Promise<EmailListResult>;
   extractEmailOrders?: (request: EmailExtractionRequest) => Promise<EmailExtractionResult>;
   extractLocalOrders?: (request: LocalExtractionRequest) => Promise<ExtractionResult>;
+  emailEvents?: EmailEventHub;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -35,7 +37,7 @@ export function createEmailApiServer(dependencies: EmailApiServerDependencies): 
   const localExtractor = dependencies.extractLocalOrders ?? ((request) => extractLocalOrders(request));
 
   return createServer((request, response) => {
-    void handleRequest(request, response, dependencies.config, lister, emailExtractor, localExtractor);
+    void handleRequest(request, response, dependencies.config, lister, emailExtractor, localExtractor, dependencies.emailEvents);
   });
 }
 
@@ -46,6 +48,7 @@ async function handleRequest(
   lister: (request: EmailListRequest) => Promise<EmailListResult>,
   emailExtractor: (request: EmailExtractionRequest) => Promise<EmailExtractionResult>,
   localExtractor: (request: LocalExtractionRequest) => Promise<ExtractionResult>,
+  emailEvents?: EmailEventHub,
 ): Promise<void> {
   try {
     if (request.method === "GET" && request.url === "/health") {
@@ -55,6 +58,11 @@ async function handleRequest(
 
     if (!isAuthorized(request, config.token)) {
       writeJson(response, 401, { error: "Unauthorized" });
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/email/events" && emailEvents) {
+      emailEvents.subscribe(response);
       return;
     }
 

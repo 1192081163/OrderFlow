@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import type {
   EmailListResult,
+  EmailNewMessagesEvent,
   EmailSettings,
   ExtractionResult,
   NewOrderEmailNotification,
@@ -18,6 +19,9 @@ export interface OrderOrganizerApi {
   extractLocal: (payload: { paths: string[]; recursive?: boolean; inferManual?: boolean }) => Promise<ExtractionResult>;
   extractEmail: (payload: EmailExtractionRequest) => Promise<EmailExtractionResult>;
   notifyNewOrderEmails: (notification: NewOrderEmailNotification) => Promise<boolean>;
+  subscribeEmailUpdates: () => Promise<boolean>;
+  unsubscribeEmailUpdates: () => Promise<boolean>;
+  onEmailUpdate: (callback: (event: EmailNewMessagesEvent) => void) => () => void;
   checkUpdates: () => Promise<UpdateCheckResult>;
   downloadAndOpenUpdate: (update: UpdateCheckResult) => Promise<string>;
   openPath: (targetPath: string) => Promise<void>;
@@ -32,6 +36,15 @@ const api: OrderOrganizerApi = {
   extractLocal: (payload) => ipcRenderer.invoke("orders:extract-local", payload),
   extractEmail: (payload) => ipcRenderer.invoke("orders:extract-email", payload),
   notifyNewOrderEmails: (notification) => ipcRenderer.invoke("notifications:new-order-emails", notification),
+  subscribeEmailUpdates: () => ipcRenderer.invoke("emails:subscribe-updates"),
+  unsubscribeEmailUpdates: () => ipcRenderer.invoke("emails:unsubscribe-updates"),
+  onEmailUpdate: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, update: EmailNewMessagesEvent) => {
+      callback(update);
+    };
+    ipcRenderer.on("emails:update", listener);
+    return () => ipcRenderer.off("emails:update", listener);
+  },
   checkUpdates: () => ipcRenderer.invoke("updates:check"),
   downloadAndOpenUpdate: (update) => ipcRenderer.invoke("updates:download-and-open", update),
   openPath: (targetPath) => ipcRenderer.invoke("shell:open-path", targetPath),

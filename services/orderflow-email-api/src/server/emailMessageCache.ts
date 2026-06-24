@@ -7,6 +7,13 @@ export interface CachedEmailMessageServiceOptions {
   refreshIntervalMs: number;
   now?: () => number;
   log?: (message: string) => void;
+  onNewMessages?: (event: EmailCacheNewMessagesEvent) => void;
+}
+
+export interface EmailCacheNewMessagesEvent {
+  email: string;
+  days: number;
+  messages: EmailMessageSummary[];
 }
 
 interface CacheEntry {
@@ -25,6 +32,7 @@ export class CachedEmailMessageService {
   private readonly refreshIntervalMs: number;
   private readonly now: () => number;
   private readonly log?: (message: string) => void;
+  private readonly onNewMessages?: (event: EmailCacheNewMessagesEvent) => void;
   private timer?: ReturnType<typeof setInterval>;
 
   constructor(options: CachedEmailMessageServiceOptions) {
@@ -33,6 +41,7 @@ export class CachedEmailMessageService {
     this.refreshIntervalMs = Math.max(0, options.refreshIntervalMs);
     this.now = options.now ?? Date.now;
     this.log = options.log;
+    this.onNewMessages = options.onNewMessages;
   }
 
   start(): void {
@@ -85,6 +94,10 @@ export class CachedEmailMessageService {
     return cloneEmailListResult(entry.result);
   }
 
+  async refreshNow(request: EmailListRequest): Promise<EmailListResult> {
+    return cloneEmailListResult(await this.refresh(request));
+  }
+
   private async refreshAll(): Promise<void> {
     await Promise.allSettled(
       [...this.entries.values()].map((entry) =>
@@ -104,10 +117,19 @@ export class CachedEmailMessageService {
     }
 
     entry.request = normalized;
+    const previousResult = entry.result;
     entry.refresh = this.listEmailMessages(normalized)
       .then((result) => {
+        const newMessages = previousResult ? findNewMessages(previousResult, result) : [];
         entry.result = cloneEmailListResult(result);
         entry.updatedAt = this.now();
+        if (newMessages.length > 0) {
+          this.onNewMessages?.({
+            email: normalized.email,
+            days: normalized.days ?? DEFAULT_LIST_DAYS,
+            messages: newMessages.map(cloneMessage),
+          });
+        }
         return entry.result;
       })
       .finally(() => {
@@ -170,6 +192,11 @@ function cloneMessage(message: EmailMessageSummary): EmailMessageSummary {
     ...message,
     excelAttachmentNames: [...message.excelAttachmentNames],
   };
+}
+
+function findNewMessages(previous: EmailListResult, next: EmailListResult): EmailMessageSummary[] {
+  const seenUids = new Set(previous.messages.map((message) => message.uid));
+  return next.messages.filter((message) => !seenUids.has(message.uid));
 }
 
 function messageOf(error: unknown): string {

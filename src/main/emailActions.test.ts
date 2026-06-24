@@ -1,6 +1,12 @@
 import { describe, expect, test } from "vitest";
 
-import { extractDesktopEmailOrders, listDesktopEmails, type RemoteEmailClient } from "./emailActions.js";
+import {
+  extractDesktopEmailOrders,
+  listDesktopEmails,
+  subscribeDesktopEmailUpdates,
+  type RemoteEmailClient,
+} from "./emailActions.js";
+import type { EmailNewMessagesEvent } from "../shared/types.js";
 
 describe("desktop email actions", () => {
   test("uses the remote email API when configured", async () => {
@@ -92,5 +98,35 @@ describe("desktop email actions", () => {
     );
 
     expect(result.extraction.rows[0]?.values[0]).toBe("101");
+  });
+  test("subscribes to remote new-message events when remote API is configured", async () => {
+    let receivedSignal: AbortSignal | undefined;
+    let emitEvent: ((event: EmailNewMessagesEvent) => void) | undefined;
+    const remoteClient: RemoteEmailClient = {
+      listEmails: async () => {
+        throw new Error("listEmails should not run in subscription test");
+      },
+      extractEmail: async () => {
+        throw new Error("extractEmail should not run in subscription test");
+      },
+      subscribeNewMessages: async (onEvent, options) => {
+        emitEvent = onEvent;
+        receivedSignal = options?.signal;
+      },
+    };
+    const events: string[] = [];
+
+    const subscription = await subscribeDesktopEmailUpdates(
+      (event) => {
+        events.push(event.messages[0]?.uid ?? "");
+      },
+      { loadRemoteEmailClient: async () => remoteClient },
+    );
+
+    emitEvent?.({ email: "orders@example.com", days: 7, messages: [{ uid: "101" } as any] });
+    subscription?.close();
+
+    expect(events).toEqual(["101"]);
+    expect(receivedSignal?.aborted).toBe(true);
   });
 });

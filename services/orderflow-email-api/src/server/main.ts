@@ -3,6 +3,7 @@ import type { Server } from "node:http";
 
 import { listEmailMessages } from "../core/extractionService.js";
 import { CachedEmailMessageService } from "./emailMessageCache.js";
+import { EmailEventHub } from "./emailEventHub.js";
 import { loadEmailApiConfig, type EmailApiConfig } from "./emailApiConfig.js";
 import { createEmailApiServer, type EmailApiServerDependencies } from "./emailApiServer.js";
 
@@ -16,6 +17,7 @@ export interface StartEmailApiServerOptions {
 
 export async function startEmailApiServer(options: StartEmailApiServerOptions = {}): Promise<Server> {
   const config = options.config ?? loadEmailApiConfig();
+  const emailEvents = new EmailEventHub();
   const cachedMessages = new CachedEmailMessageService({
     listEmailMessages: options.listEmailMessages ?? listEmailMessages,
     defaultRequest: {
@@ -28,6 +30,7 @@ export async function startEmailApiServer(options: StartEmailApiServerOptions = 
     },
     refreshIntervalMs: config.cacheRefreshMs,
     log: options.log,
+    onNewMessages: (event) => emailEvents.broadcastNewMessages(event),
   });
   cachedMessages.start();
 
@@ -36,6 +39,7 @@ export async function startEmailApiServer(options: StartEmailApiServerOptions = 
     listEmailMessages: (request) => cachedMessages.list(request),
     extractEmailOrders: options.extractEmailOrders,
     extractLocalOrders: options.extractLocalOrders,
+    emailEvents,
   });
   server.on("close", () => cachedMessages.stop());
 

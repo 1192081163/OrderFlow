@@ -32,9 +32,15 @@ describe("Electron preload bridge", () => {
       readFile(path.join(root, "src/main/ipcHandlers.ts"), "utf8"),
     ]);
 
-expect(preloadSource).toContain("notifyNewOrderEmails");
-expect(preloadSource).toContain("notifications:new-order-emails");
-expect(preloadSource).toContain("downloadAndOpenUpdate");
+    expect(preloadSource).toContain("notifyNewOrderEmails");
+    expect(preloadSource).toContain("notifications:new-order-emails");
+    expect(preloadSource).toContain("subscribeEmailUpdates");
+    expect(preloadSource).toContain("emails:subscribe-updates");
+    expect(preloadSource).toContain("emails:update");
+    expect(ipcSource).toContain("emails:subscribe-updates");
+    expect(ipcSource).toContain("emails:unsubscribe-updates");
+    expect(ipcSource).toContain("emails:update");
+    expect(preloadSource).toContain("downloadAndOpenUpdate");
 expect(preloadSource).toContain("updates:download-and-open");
 expect(ipcSource).toContain("notifications:new-order-emails");
 expect(ipcSource).toContain("updates:download-and-open");

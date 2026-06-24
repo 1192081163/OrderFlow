@@ -8,13 +8,15 @@ import {
 import { loadEmailSettings, saveEmailSettings } from "../core/settings.js";
 import { checkForUpdates, downloadUpdateExecutable } from "../core/updateChecker.js";
 import type { EmailSettings, NewOrderEmailNotification, ProgressEvent, UpdateCheckResult } from "../shared/types.js";
-import { extractDesktopEmailOrders, listDesktopEmails } from "./emailActions.js";
+import { extractDesktopEmailOrders, listDesktopEmails, subscribeDesktopEmailUpdates, type DesktopEmailSubscription } from "./emailActions.js";
 
 interface LocalExtractionPayload {
   paths?: string[];
   recursive?: boolean;
   inferManual?: boolean;
 }
+
+const emailUpdateSubscriptions = new Map<number, DesktopEmailSubscription>();
 
 export function registerIpcHandlers(): void {
   ipcMain.handle("settings:load", async () => loadEmailSettings());
@@ -53,6 +55,26 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("emails:list", async (_event, payload: EmailListRequest) => listDesktopEmails(payload));
 
+  ipcMain.handle("emails:subscribe-updates", async (event): Promise<boolean> => {
+    closeEmailUpdateSubscription(event.sender.id);
+    const subscription = await subscribeDesktopEmailUpdates((update) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send("emails:update", update);
+      }
+    });
+    if (!subscription) {
+      return false;
+    }
+    emailUpdateSubscriptions.set(event.sender.id, subscription);
+    event.sender.once("destroyed", () => closeEmailUpdateSubscription(event.sender.id));
+    return true;
+  });
+
+  ipcMain.handle("emails:unsubscribe-updates", async (event): Promise<boolean> => {
+    closeEmailUpdateSubscription(event.sender.id);
+    return true;
+  });
+
   ipcMain.handle("notifications:new-order-emails", async (event, notification: NewOrderEmailNotification) =>
     showNewOrderEmailNotification(event.sender, notification),
   );
@@ -81,6 +103,15 @@ export function registerIpcHandlers(): void {
       throw new Error(error);
     }
   });
+}
+
+function closeEmailUpdateSubscription(webContentsId: number): void {
+  const existing = emailUpdateSubscriptions.get(webContentsId);
+  if (!existing) {
+    return;
+  }
+  existing.close();
+  emailUpdateSubscriptions.delete(webContentsId);
 }
 
 function sendProgress(sender: Electron.WebContents): (event: ProgressEvent) => void {

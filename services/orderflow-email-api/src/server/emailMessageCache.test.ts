@@ -78,6 +78,32 @@ describe("cached email message service", () => {
       messages: [{ uid: "default" }],
     });
   });
+  test("emits new message events only after an existing cache gains unseen uids", async () => {
+    const firstResult = resultWithMessage("uid-1");
+    const secondResult = {
+      ...resultWithMessage("uid-2"),
+      messages: [resultWithMessage("uid-2").messages[0], resultWithMessage("uid-1").messages[0]],
+    };
+    const results = [firstResult, secondResult];
+    const events: Array<{ email: string; messages: string[] }> = [];
+    const service = new CachedEmailMessageService({
+      refreshIntervalMs: 60_000,
+      listEmailMessages: async () => results.shift() ?? secondResult,
+      onNewMessages: (event) => {
+        events.push({
+          email: event.email,
+          messages: event.messages.map((message) => message.uid),
+        });
+      },
+    });
+
+    await service.list(testRequest());
+    expect(events).toEqual([]);
+
+    await service.refreshNow(testRequest());
+
+    expect(events).toEqual([{ email: "orders@example.com", messages: ["uid-2"] }]);
+  });
 });
 
 function testRequest(): EmailListRequest {

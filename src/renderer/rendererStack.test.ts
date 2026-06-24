@@ -99,9 +99,11 @@ describe("renderer React stack", () => {
     expect(appSource).toContain("每 5 分钟自动刷新");
     expect(appSource).toContain("候选邮件");
     expect(appSource).toContain("Excel 候选附件");
-expect(appSource).toContain("messageUids");
-expect(appSource).toContain("listEmails");
-expect(appSource).toContain("正在下载新版程序");
+    expect(appSource).toContain("messageUids");
+    expect(appSource).toContain("listEmails");
+    expect(appSource).toContain("subscribeEmailUpdates");
+    expect(appSource).toContain("onEmailUpdate");
+    expect(appSource).toContain("正在下载新版程序");
 expect(appSource).toContain("api.downloadAndOpenUpdate(result)");
 expect(appSource).toContain("新版程序已启动");
 expect(appSource).not.toContain("下载地址：");

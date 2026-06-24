@@ -90,6 +90,12 @@ export interface EmailListResult {
   nonOrderExcelAttachmentCount?: number;
 }
 
+export interface EmailNewMessagesEvent {
+  email: string;
+  days: number;
+  messages: EmailMessageSummary[];
+}
+
 export interface NewOrderEmailNotification {
   title: string;
   body: string;
