@@ -61,7 +61,7 @@ async function handleRequest(
     if (request.method === "POST" && request.url === "/api/email/messages") {
       const body = await readJsonBody(request);
       const result = await lister({
-        ...emailConnectionFromConfig(config),
+        ...emailConnectionFromConfig(config, body),
         days: optionalNumber(body, "days"),
       });
       writeJson(response, 200, result);
@@ -71,7 +71,7 @@ async function handleRequest(
     if (request.method === "POST" && request.url === "/api/email/extract") {
       const body = await readJsonBody(request);
       const result = await emailExtractor({
-        ...emailConnectionFromConfig(config),
+        ...emailConnectionFromConfig(config, body),
         hours: optionalNumber(body, "hours"),
         inferManual: optionalBoolean(body, "inferManual"),
         messageUids: optionalStringArray(body, "messageUids"),
@@ -103,12 +103,13 @@ async function handleRequest(
 
 function emailConnectionFromConfig(
   config: EmailApiConfig,
+  body: JsonRecord = {},
 ): Pick<EmailListRequest, "email" | "authCode" | "server" | "port" | "proxy"> {
   return {
-    email: config.email,
-    authCode: config.authCode,
-    server: config.server,
-    port: config.imapPort,
+    email: optionalString(body, "email") ?? config.email,
+    authCode: optionalString(body, "authCode") ?? config.authCode,
+    server: optionalString(body, "server") ?? config.server,
+    port: optionalNumber(body, "port") ?? config.imapPort,
     proxy: config.imapProxy,
   };
 }

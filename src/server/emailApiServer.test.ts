@@ -80,6 +80,50 @@ describe("email API server", () => {
     ]);
   });
 
+  test("uses mailbox credentials from request body when provided", async () => {
+    const calls: unknown[] = [];
+    const server = createEmailApiServer(
+      testDependencies({
+        listEmailMessages: async (request) => {
+          calls.push(request);
+          return {
+            days: request.days ?? 7,
+            scannedMessages: 0,
+            orderAttachmentCount: 0,
+            nonOrderExcelAttachmentCount: 0,
+            messages: [],
+          };
+        },
+      }),
+    );
+
+    const response = await request(
+      server,
+      "POST",
+      "/api/email/messages",
+      {
+        email: " body@example.com ",
+        authCode: " body-secret ",
+        server: " imap.body.example.com ",
+        port: 2993,
+        days: 1,
+      },
+      "token",
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([
+      {
+        email: "body@example.com",
+        authCode: "body-secret",
+        server: "imap.body.example.com",
+        port: 2993,
+        proxy: "socks5://127.0.0.1:7891",
+        days: 1,
+      },
+    ]);
+  });
+
   test("extracts selected message UIDs through existing extraction service config", async () => {
     const calls: unknown[] = [];
     const server = createEmailApiServer(
