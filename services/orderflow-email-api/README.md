@@ -22,11 +22,15 @@ EMAIL_API_PORT=8787
 EMAIL_IMAP_SERVER=imap.exmail.qq.com
 EMAIL_IMAP_PORT=993
 EMAIL_IMAP_PROXY=
+EMAIL_CACHE_DAYS=7
+EMAIL_CACHE_REFRESH_SECONDS=120
 ```
 
 `EMAIL_AUTH_CODE` 不要写进客户端代码，客户端只需要 `EMAIL_API_TOKEN`。
 
 `EMAIL_IMAP_PROXY` 可选，服务器直连 IMAP 端口受限时使用，例如 `socks5://127.0.0.1:7891` 或 `http://127.0.0.1:7890`。
+
+服务启动后会用 `.env` 中的邮箱预拉取邮件列表缓存。`EMAIL_CACHE_DAYS` 控制默认预拉天数，`EMAIL_CACHE_REFRESH_SECONDS` 控制后台刷新间隔；桌面端刷新邮件时优先读取缓存，缓存未命中时才实时连接 IMAP。
 
 ## 本地运行
 
