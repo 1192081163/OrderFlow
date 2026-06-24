@@ -1,15 +1,14 @@
 import { BrowserWindow, Notification, app, dialog, ipcMain, shell } from "electron";
 
 import {
-  extractEmailOrders,
   extractLocalOrders,
-  listEmailMessages,
   type EmailExtractionRequest,
   type EmailListRequest,
 } from "../core/extractionService.js";
 import { loadEmailSettings, saveEmailSettings } from "../core/settings.js";
 import { checkForUpdates, downloadUpdateExecutable } from "../core/updateChecker.js";
 import type { EmailSettings, NewOrderEmailNotification, ProgressEvent, UpdateCheckResult } from "../shared/types.js";
+import { extractDesktopEmailOrders, listDesktopEmails } from "./emailActions.js";
 
 interface LocalExtractionPayload {
   paths?: string[];
@@ -52,7 +51,7 @@ export function registerIpcHandlers(): void {
     return result.canceled ? [] : result.filePaths;
   });
 
-  ipcMain.handle("emails:list", async (_event, payload: EmailListRequest) => listEmailMessages(payload));
+  ipcMain.handle("emails:list", async (_event, payload: EmailListRequest) => listDesktopEmails(payload));
 
   ipcMain.handle("notifications:new-order-emails", async (event, notification: NewOrderEmailNotification) =>
     showNewOrderEmailNotification(event.sender, notification),
@@ -70,7 +69,7 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle("orders:extract-email", async (event, payload: EmailExtractionRequest) =>
-    extractEmailOrders(payload, sendProgress(event.sender)),
+    extractDesktopEmailOrders(payload, sendProgress(event.sender)),
   );
 
   ipcMain.handle("shell:open-path", async (_event, targetPath: string) => {

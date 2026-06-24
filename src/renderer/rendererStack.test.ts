@@ -123,6 +123,7 @@ expect(ipcSource).toContain("updates:download-and-open");
     expect(appSource).toContain("打开 Excel");
     expect(appSource).not.toContain("打开 CSV");
     expect(appSource).not.toContain("打开复核表");
+    expect(appSource).toContain("hasOutputPaths");
     expect(appSource).not.toContain('openLatest("csvOutput")');
     expect(appSource).not.toContain('openLatest("auditOutput")');
   });

@@ -258,11 +258,13 @@ function App() {
   }
 
   function renderExtractionResult(result: ExtractionResult): void {
-    setLatestOutputs(result.outputs);
+    setLatestOutputs(hasOutputPaths(result.outputs) ? result.outputs : null);
     setProgress(100);
     setResultFailures(result.failures);
     setSummary(`成功 ${result.rows.length} 个订单，失败 ${result.failures.length} 个，跳过 ${result.skippedFiles.length} 个文件`);
-    appendLog(`输出目录：${result.outputs.outputDir}`);
+    if (result.outputs.outputDir) {
+      appendLog(`输出目录：${result.outputs.outputDir}`);
+    }
     result.failures.forEach((failure) => appendLog(`失败 ${failure.path}: ${failure.error}`));
   }
 
@@ -667,6 +669,10 @@ function renderProgress(
   setProgress(percent);
   const label = event.status === "running" ? "正在提取" : event.status === "completed" ? "完成" : "失败";
   appendLog(`[${event.index}/${event.total}] ${label} ${event.filename}`);
+}
+
+function hasOutputPaths(outputs: OutputPaths): boolean {
+  return Boolean(outputs.outputDir || outputs.xlsxOutput || outputs.csvOutput || outputs.auditOutput);
 }
 
 function renderMessageBadge(message: EmailMessageSummary, extracted: boolean, newlyArrived = false) {

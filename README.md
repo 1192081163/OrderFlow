@@ -20,6 +20,8 @@ orderflow-desktop-windows.exe
 4. 也可以点击 `本地提取`，选择或拖入 Excel 文件。
 5. 软件会读取 `.xlsx/.xlsm` 附件或本地文件，并生成订单整理结果。
 
+如果配置了远程邮件 API，桌面端仍只需要填写企业微信邮箱和邮箱授权码；API 地址和服务 token 通过本机隐藏配置或环境变量提供，不显示在设置界面。
+
 ## 本地开发运行
 
 当前版本使用 Electron、React、TypeScript、Vite、Fluent UI React 和 Vitest 构建桌面应用。订单提取规则继续使用仓库里的 Python 规则引擎，Electron 通过 `python_extraction_bridge.py` 调用它。
@@ -109,6 +111,14 @@ __pycache__/       可删除的 Python 缓存
 ```text
 ~/.order_organizer_assistant/email_settings.json
 ```
+
+远程邮件 API 的内部配置可保存在本机：
+
+```text
+~/.order_organizer_assistant/email_api_client.json
+```
+
+也可以通过环境变量 `ORDERFLOW_EMAIL_API_URL` 和 `ORDERFLOW_EMAIL_API_TOKEN` 指定。该配置不属于用户界面配置，不应提交或上传。
 
 当前版本未使用系统 Keychain 或 Credential Manager。该文件不属于仓库内容，不应提交或上传；如需更强凭据保护，请先改造凭据存储。
 
