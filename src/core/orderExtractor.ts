@@ -200,6 +200,8 @@ interface ManualTotals {
   w: number;
   weightedWParts: number;
   x: number;
+  screwKdXParts: number;
+  screwKdVParts: number;
   overSizeQty: number;
   overSizeMarker: string | null;
   doubleQty: number;
@@ -1747,7 +1749,18 @@ function writeGoods(
 }
 
 function createManualTotals(): ManualTotals {
-  return { mitre: 0, v: 0, w: 0, weightedWParts: 0, x: 0, overSizeQty: 0, overSizeMarker: null, doubleQty: 0 };
+  return {
+    mitre: 0,
+    v: 0,
+    w: 0,
+    weightedWParts: 0,
+    x: 0,
+    screwKdXParts: 0,
+    screwKdVParts: 0,
+    overSizeQty: 0,
+    overSizeMarker: null,
+    doubleQty: 0,
+  };
 }
 
 function isScrewFixProfile(profile: string): boolean {
@@ -1778,17 +1791,26 @@ function addManualTotals(
     const hinge = numberValue(detail.hingeQty) ?? 0;
     const striker = parseStrikerQty(detail.strikerType, detail.strikerType2);
     const sill = hasValue(detail.sill) ? 1 : 0;
+    let lineV = 0;
     if (cleanText(detail.hingeType).toUpperCase().includes("SCREW FIXED PREP")) {
-      totals.v += quantity * (striker + sill);
+      lineV = quantity * (striker + sill);
+      totals.v += lineV;
       addWTotal(totals, quantity * hinge, detail.partsWMultiplier);
     } else if (detail.hingeQtyBucket === "w") {
-      totals.v += quantity * (striker + sill);
+      lineV = quantity * (striker + sill);
+      totals.v += lineV;
       addWTotal(totals, quantity * hinge, detail.partsWMultiplier);
     } else {
-      totals.v += quantity * (hinge + striker + sill);
+      lineV = quantity * (hinge + striker + sill);
+      totals.v += lineV;
     }
     if (goods === "KD") {
-      totals.x += quantity * kdXPartsMultiplier(detail.profile);
+      const kdXParts = quantity * kdXPartsMultiplier(detail.profile);
+      totals.x += kdXParts;
+      if (isScrewFixProfile(detail.profile)) {
+        totals.screwKdXParts += kdXParts;
+        totals.screwKdVParts += lineV;
+      }
     }
   }
   totals.v += detail.vPartsExtra ?? 0;
@@ -1850,7 +1872,14 @@ function writeManualTotals(
     values[23] = excelDisplayInt(totals.x);
   }
   if (totals.v || totals.w || totals.x) {
-    values[20] = excelDisplayInt(totals.v + totals.weightedWParts + totals.x * 0.43);
+    const screwKdX = Math.min(totals.x, totals.screwKdXParts);
+    const screwKdV = Math.min(totals.v, totals.screwKdVParts);
+    values[20] = excelDisplayInt(
+      Math.max(0, totals.v - screwKdV)
+      + totals.weightedWParts
+      + Math.max(0, totals.x - screwKdX) * 0.43
+      + screwKdX,
+    );
   }
 }
 

@@ -818,6 +818,7 @@ def test_standard_worksheet_screw_fix_kd_uses_seven_x_parts_per_qty(tmp_path: Pa
     row = extract.extract_workbook(save_workbook(wb, tmp_path / "worksheet-kd-screw-fix.xlsx"), infer_manual=True)
 
     assert row.values[11] == "KD"
+    assert row.values[20] == 42
     assert row.values[23] == 42
 
 

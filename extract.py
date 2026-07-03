@@ -294,6 +294,8 @@ class ExtractedRow:
     source_file: str = ""
     parts_w_multiplier: float = 1.43
     parts_extra: float = 0.0
+    screw_kd_x_parts: float = 0.0
+    screw_kd_v_parts: float = 0.0
     parts_keep_decimals: bool = False
 
     def add_manual_check(self, message: str) -> None:
@@ -1316,6 +1318,8 @@ def extract_worksheet_workbook(path: Path, row: ExtractedRow, wb: Any, infer_man
     v_total = 0.0
     w_total = 0.0
     x_total = 0.0
+    screw_kd_x_total = 0.0
+    screw_kd_v_total = 0.0
     mitre_total = 0.0
     double_qty = 0.0
     over_size_qty = 0.0
@@ -1361,7 +1365,11 @@ def extract_worksheet_workbook(path: Path, row: ExtractedRow, wb: Any, infer_man
             line_v += deluxe_cleats_extra_parts(path, profile, goods, qty)
             v_total += line_v
             if goods == "KD" and qty > 0:
-                x_total += qty * kd_x_parts_multiplier(profile)
+                kd_x_parts = qty * kd_x_parts_multiplier(profile)
+                x_total += kd_x_parts
+                if is_screw_fix_profile(profile):
+                    screw_kd_x_total += kd_x_parts
+                    screw_kd_v_total += line_v
 
         is_double = clean_text(ws[f"O{idx}"].value).upper() == "YES"
         if qty > 0 and is_double:
@@ -1399,6 +1407,9 @@ def extract_worksheet_workbook(path: Path, row: ExtractedRow, wb: Any, infer_man
             row.parts_w_multiplier = 1.0
         if x_total:
             row.values[23] = excel_display_int(x_total)
+        if screw_kd_x_total:
+            row.screw_kd_x_parts += screw_kd_x_total
+            row.screw_kd_v_parts += screw_kd_v_total
 
 
 def extract_total_doors_nonstandard_goods(ws: Any, row: ExtractedRow, infer_manual: bool = False) -> bool:
@@ -2379,6 +2390,8 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
     v_total = 0.0
     w_total = 0.0
     x_total = 0.0
+    screw_kd_x_total = 0.0
+    screw_kd_v_total = 0.0
     mitre_total = 0.0
     double_qty = 0.0
     blank_zero_v_total = False
@@ -2477,7 +2490,11 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
             v_total += line_v
             w_total += line_w
             if goods == "KD":
-                x_total += product_qty * kd_x_parts_multiplier(profile)
+                kd_x_parts = product_qty * kd_x_parts_multiplier(profile)
+                x_total += kd_x_parts
+                if is_screw_fix_profile(profile):
+                    screw_kd_x_total += kd_x_parts
+                    screw_kd_v_total += line_v
             if ws.title == "Sheet1" and any(
                 "HOLES" in sheet1_header_text(ws, header_row, col_idx) and has_value(ws.cell(idx, col_idx).value)
                 for col_idx in range(1, ws.max_column + 1)
@@ -2553,7 +2570,11 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
             v_total += line_v
             w_total += line_w
             if goods == "KD":
-                x_total += product_qty * kd_x_parts_multiplier(profile)
+                kd_x_parts = product_qty * kd_x_parts_multiplier(profile)
+                x_total += kd_x_parts
+                if is_screw_fix_profile(profile):
+                    screw_kd_x_total += kd_x_parts
+                    screw_kd_v_total += line_v
             if ws.title == "Main Sheet" and goods == "COMMERCIAL" and line_w:
                 row.parts_w_multiplier = 1.0
 
@@ -2579,6 +2600,8 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
         if kd_qty:
             goods_totals["COMMERCIAL"] = goods_totals.get("COMMERCIAL", 0.0) + kd_qty
             x_total = 0.0
+            screw_kd_x_total = 0.0
+            screw_kd_v_total = 0.0
         flush_w_total, flush_v_subtract = sheet1_thomas_flush_stud_adjustment(ws)
         if flush_w_total:
             w_total += flush_w_total
@@ -2597,6 +2620,9 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
             row.values[22] = excel_display_int(w_total)
         if x_total:
             row.values[23] = excel_display_int(x_total)
+        if screw_kd_x_total:
+            row.screw_kd_x_parts += screw_kd_x_total
+            row.screw_kd_v_parts += screw_kd_v_total
 
 
 def extract_sheet1_workbook(path: Path, row: ExtractedRow, wb: Any, infer_manual: bool = False) -> None:
@@ -2630,7 +2656,15 @@ def compute_parts(row: ExtractedRow) -> None:
     w = number_or_none(row.values[22]) or 0
     x = number_or_none(row.values[23]) or 0
     if v or w or x or row.parts_extra:
-        value = float(v) + float(w) * row.parts_w_multiplier + float(x) * 0.43 + row.parts_extra
+        screw_kd_x = min(float(x), row.screw_kd_x_parts)
+        screw_kd_v = min(float(v), row.screw_kd_v_parts)
+        value = (
+            max(0.0, float(v) - screw_kd_v)
+            + float(w) * row.parts_w_multiplier
+            + max(0.0, float(x) - screw_kd_x) * 0.43
+            + screw_kd_x
+            + row.parts_extra
+        )
         row.values[20] = excel_display_decimal(value) if row.parts_keep_decimals else excel_display_int(value)
 
 

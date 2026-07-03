@@ -1408,6 +1408,7 @@ describe("extractWorkbook", () => {
     const row = await extractWorkbook(filePath, { inferManual: true });
 
     expect(row.values[11]).toBe("KD");
+    expect(row.values[20]).toBe(42);
     expect(row.values[23]).toBe(42);
   });
 
