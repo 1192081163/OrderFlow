@@ -1,0 +1,9 @@
+[Unit]
+Description=Keep mihomo proxy node healthy for WeCom IMAP
+Wants=network-online.target
+After=network-online.target mihomo.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mihomo-imap-node-keeper --timeout 8 --settle-seconds 0.5
+Nice=5

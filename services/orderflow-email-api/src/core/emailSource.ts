@@ -17,6 +17,7 @@ export const DEFAULT_IMAP_PORT = 993;
 
 const SUPPORTED_EXCEL_SUFFIXES = new Set([".xlsx", ".xlsm"]);
 const DEFAULT_EMAIL_LIST_DAYS = 7;
+const TRANSIENT_IMAP_ATTEMPTS = 3;
 
 export interface EmailAttachment {
   filename: string;
@@ -235,6 +236,10 @@ export function isMessageWithinFetchWindow(messageDate: Date | undefined, cutoff
 }
 
 async function fetchExcelAttachments(config: ImapConfig, options: EmailFetchOptions): Promise<EmailAttachmentBatch> {
+  return retryTransientImapConnection(() => fetchExcelAttachmentsOnce(config, options));
+}
+
+async function fetchExcelAttachmentsOnce(config: ImapConfig, options: EmailFetchOptions): Promise<EmailAttachmentBatch> {
   const client = createClient(config);
   const cutoff = options.hours === undefined ? undefined : new Date(Date.now() - options.hours * 60 * 60 * 1000);
   const selectedUids = options.messageUids?.length ? new Set(options.messageUids) : undefined;
@@ -310,6 +315,30 @@ async function fetchExcelAttachments(config: ImapConfig, options: EmailFetchOpti
   }
 
   return { attachments, scannedMessages };
+}
+
+async function retryTransientImapConnection<T>(operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; attempt <= TRANSIENT_IMAP_ATTEMPTS; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt === TRANSIENT_IMAP_ATTEMPTS || !isTransientImapConnectionError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error("IMAP retry loop exhausted unexpectedly.");
+}
+
+function isTransientImapConnectionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const code =
+    error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  const text = `${message} ${code}`;
+  return /Client network socket disconnected before secure TLS connection was established|ECONNRESET|ETIMEDOUT|EPIPE|socket hang up|SSL_ERROR_SYSCALL/i.test(
+    text,
+  );
 }
 
 function buildAttachmentFetchRange(

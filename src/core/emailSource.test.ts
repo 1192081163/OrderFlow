@@ -24,9 +24,11 @@ import type { ImapConfig } from "../shared/types.js";
 const imapMock = vi.hoisted(() => ({
   messages: [] as unknown[],
   downloads: {} as Record<string, Record<string, { content: Buffer | null; meta?: { filename?: string } }>>,
+  connectFailures: [] as Error[],
   downloadManyWhileFetching: false,
   instances: [] as Array<{
     options?: unknown;
+    connectCalls: number;
     fetchCalls: Array<{ range: unknown; query: unknown; options: unknown }>;
     downloadManyCalls: Array<{ range: string; parts: string[]; options: unknown }>;
     lockedMailbox?: string;
@@ -41,6 +43,7 @@ vi.mock("imapflow", () => {
     fetchCalls: Array<{ range: unknown; query: unknown; options: unknown }> = [];
     downloadManyCalls: Array<{ range: string; parts: string[]; options: unknown }> = [];
     lockedMailbox?: string;
+    connectCalls = 0;
     releasedLocks = 0;
     logoutCalls = 0;
     activeFetches = 0;
@@ -51,7 +54,13 @@ vi.mock("imapflow", () => {
       imapMock.instances.push(this);
     }
 
-    async connect(): Promise<void> {}
+    async connect(): Promise<void> {
+      this.connectCalls += 1;
+      const error = imapMock.connectFailures.shift();
+      if (error) {
+        throw error;
+      }
+    }
 
     async getMailboxLock(mailbox: string): Promise<{ release: () => void }> {
       this.lockedMailbox = mailbox;
@@ -100,6 +109,7 @@ beforeEach(async () => {
   tempRoot = await mkdtemp(path.join(os.tmpdir(), "email-source-"));
   imapMock.messages = [];
   imapMock.downloads = {};
+  imapMock.connectFailures = [];
   imapMock.downloadManyWhileFetching = false;
   imapMock.instances.length = 0;
 });
@@ -361,6 +371,30 @@ describe("email IMAP scanning", () => {
     expect(imapMock.instances[0]?.downloadManyCalls).toEqual([
       { range: "601", parts: ["1", "2"], options: { uid: true } },
     ]);
+  });
+
+  test("retries transient TLS disconnects while fetching selected attachments", async () => {
+    imapMock.connectFailures = [new Error("Client network socket disconnected before secure TLS connection was established")];
+    imapMock.messages = [
+      makeMetadataMessage({
+        uid: 701,
+        subject: "PO 701",
+        date: new Date("2026-06-17T03:30:00.000Z"),
+        attachments: ["order.xlsx"],
+      }),
+    ];
+    imapMock.downloads = {
+      "701": {
+        "1": { content: await makeOrderWorkbookBuffer(), meta: { filename: "order.xlsx" } },
+      },
+    };
+
+    const result = await fetchEmailOrderFiles(testImapConfig(), tempRoot, { messageUids: ["701"] });
+
+    expect(result.attachmentCount).toBe(1);
+    expect(imapMock.instances).toHaveLength(2);
+    expect(imapMock.instances[0]?.fetchCalls).toEqual([]);
+    expect(imapMock.instances[1]?.fetchCalls).toHaveLength(1);
   });
 });
 
