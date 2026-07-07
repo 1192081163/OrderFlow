@@ -113,6 +113,23 @@ def test_run_extraction_keeps_latest_source_version_for_duplicate_jobs(tmp_path:
     assert result.rows[0].source_file == newer.name
 
 
+def test_run_extraction_writes_only_result_workbook(tmp_path: Path) -> None:
+    order = tmp_path / "29698 order.xlsx"
+    make_order_workbook(order, "29698")
+    output_dir = tmp_path / "order_extraction_output"
+    output_dir.mkdir()
+    stale_csv = output_dir / "extracted_job_rows.csv"
+    stale_audit = output_dir / "audit.csv"
+    stale_csv.write_text("old csv", encoding="utf-8")
+    stale_audit.write_text("old audit", encoding="utf-8")
+
+    result = run_extraction([order])
+
+    assert result.outputs.xlsx_output.exists()
+    assert not result.outputs.csv_output.exists()
+    assert not result.outputs.audit_output.exists()
+
+
 def test_run_extraction_sorts_rows_by_ideal_delivery_date(tmp_path: Path) -> None:
     later = tmp_path / "100 late.xlsx"
     blank = tmp_path / "200 blank.xlsx"

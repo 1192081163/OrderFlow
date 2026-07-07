@@ -58,9 +58,9 @@ describe("python order extraction bridge", () => {
     expect(result.rows[0].values[2]).toBe("CELEBRATION");
     expect(result.rows[0].values[6]).toBe("29698");
     expect(result.rows[0].values[11]).toBe("MODERN");
-    expect(await stat(result.outputs.csvOutput)).toBeTruthy();
     expect(await stat(result.outputs.xlsxOutput)).toBeTruthy();
-    expect(await stat(result.outputs.auditOutput)).toBeTruthy();
+    await expect(stat(result.outputs.csvOutput)).rejects.toThrow();
+    await expect(stat(result.outputs.auditOutput)).rejects.toThrow();
   });
 
   test("forwards Python file progress events", async () => {

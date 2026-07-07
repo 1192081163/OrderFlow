@@ -6,7 +6,7 @@ import { defaultOutputPaths } from "./outputPaths.js";
 import { sortExtractedRowsByIdealDate } from "./rowSorting.js";
 import { appConfigDir, defaultEmailDownloadRoot } from "./settings.js";
 import type { EmailExtractionRequest, EmailExtractionResult, EmailListRequest, LocalExtractionRequest } from "./extractionService.js";
-import { writeAuditCsv, writeCsv, writeXlsx } from "./writers.js";
+import { writeResultWorkbook } from "./writers.js";
 import type { EmailListResult, EmailNewMessagesEvent, ExtractionResult } from "../shared/types.js";
 
 export interface RemoteEmailApiConfig {
@@ -79,9 +79,7 @@ export class RemoteEmailApiClient {
     const result = await this.post<EmailExtractionResult>("/api/email/extract", request);
     const rows = sortExtractedRowsByIdealDate(result.extraction.rows);
     const outputs = defaultOutputPaths(timestampedEmailOutputDir(this.now(), this.emailOutputRoot));
-    await writeCsv(rows, outputs.csvOutput);
-    await writeXlsx(rows, outputs);
-    await writeAuditCsv(rows, outputs.auditOutput);
+    await writeResultWorkbook(rows, outputs);
 
     return {
       ...result,
@@ -111,9 +109,7 @@ export class RemoteEmailApiClient {
     });
     const rows = sortExtractedRowsByIdealDate(remoteResult.rows);
     const outputs = defaultOutputPaths(resolution.baseDir);
-    await writeCsv(rows, outputs.csvOutput);
-    await writeXlsx(rows, outputs);
-    await writeAuditCsv(rows, outputs.auditOutput);
+    await writeResultWorkbook(rows, outputs);
 
     return {
       ...remoteResult,

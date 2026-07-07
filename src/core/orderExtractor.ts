@@ -6,7 +6,7 @@ import { TRACK_HEADERS, type ExtractedOrderRow, type ExtractionResult, type Prog
 import { resolveInputPaths } from "./fileScanner.js";
 import { defaultOutputPaths } from "./outputPaths.js";
 import { sortExtractedRowsByIdealDate } from "./rowSorting.js";
-import { writeAuditCsv, writeCsv, writeXlsx } from "./writers.js";
+import { writeResultWorkbook } from "./writers.js";
 
 const OVER_SIZE_REVEAL_WIDTH_THRESHOLD = 1220;
 const OVER_SIZE_OVERALL_WIDTH_THRESHOLD = 1300;
@@ -366,9 +366,7 @@ export async function runOrderExtraction(paths: string[], options: RunExtraction
   const dedupedRows = dedupeLatestRows(rowEntries);
   const sortedRows = sortExtractedRowsByIdealDate(dedupedRows);
 
-  await writeCsv(sortedRows, outputs.csvOutput);
-  await writeXlsx(sortedRows, outputs);
-  await writeAuditCsv(sortedRows, outputs.auditOutput);
+  await writeResultWorkbook(sortedRows, outputs);
 
   return {
     inputFiles: resolution.inputFiles,

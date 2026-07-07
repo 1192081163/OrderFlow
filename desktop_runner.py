@@ -105,6 +105,11 @@ def default_output_paths(base_dir: Path) -> OutputPaths:
     )
 
 
+def remove_sidecar_outputs(outputs: OutputPaths) -> None:
+    for path in (outputs.csv_output, outputs.audit_output):
+        path.unlink(missing_ok=True)
+
+
 def run_extraction(
     paths: Iterable[Path | str],
     *,
@@ -140,9 +145,8 @@ def run_extraction(
 
     rows = extract.dedupe_latest_rows(rows, resolution.input_files)
     rows = extract.sort_rows_by_ideal_delivery_date(rows)
-    extract.write_csv(rows, outputs.csv_output)
+    remove_sidecar_outputs(outputs)
     extract.write_xlsx(rows, outputs.xlsx_output, resolution.base_dir, resolution.input_files)
-    extract.write_audit_csv(rows, outputs.audit_output)
     return ExtractionResult(
         input_files=resolution.input_files,
         rows=rows,

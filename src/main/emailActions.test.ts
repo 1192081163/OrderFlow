@@ -130,8 +130,9 @@ describe("desktop email actions", () => {
     expect(events).toEqual(["101"]);
     expect(receivedSignal?.aborted).toBe(true);
   });
-  test("extracts local files through remote API when configured", async () => {
+  test("extracts local files through local Python even when remote API is configured", async () => {
     const remoteCalls: unknown[] = [];
+    const localCalls: unknown[] = [];
     const remoteClient: RemoteEmailClient = {
       listEmails: async () => {
         throw new Error("listEmails should not run in this test");
@@ -161,13 +162,26 @@ describe("desktop email actions", () => {
       undefined,
       {
         loadRemoteEmailClient: async () => remoteClient,
-        extractLocalOrders: async () => {
-          throw new Error("local extraction should not run when remote API is configured");
+        extractLocalOrders: async (request) => {
+          localCalls.push(request);
+          return {
+            inputFiles: request.paths,
+            rows: [{ values: ["PYTHON"], notes: [], manualCheck: [], sourceFile: "local.xlsx" }],
+            skippedFiles: [],
+            failures: [],
+            outputs: {
+              outputDir: "/tmp/out",
+              csvOutput: "/tmp/out/out.csv",
+              xlsxOutput: "/tmp/out/out.xlsx",
+              auditOutput: "/tmp/out/audit.csv",
+            },
+          };
         },
       },
     );
 
-    expect(result.rows[0]?.values[0]).toBe("LOCAL");
-    expect(remoteCalls).toEqual([{ paths: ["/tmp/local.xlsx"], inferManual: true }]);
+    expect(result.rows[0]?.values[0]).toBe("PYTHON");
+    expect(localCalls).toEqual([{ paths: ["/tmp/local.xlsx"], inferManual: true }]);
+    expect(remoteCalls).toEqual([]);
   });
 });

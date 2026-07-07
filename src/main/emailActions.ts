@@ -64,11 +64,6 @@ export async function extractDesktopLocalOrders(
   progress?: (event: ProgressEvent) => void,
   dependencies: DesktopEmailDependencies = {},
 ): Promise<ExtractionResult> {
-  const remoteClient = await loadConfiguredRemoteEmailClient(dependencies);
-  if (remoteClient?.extractLocal) {
-    return remoteClient.extractLocal(request);
-  }
-
   const localExtractLocalOrders = dependencies.extractLocalOrders ?? extractLocalOrders;
   return localExtractLocalOrders(request, progress);
 }

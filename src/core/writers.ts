@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import ExcelJS from "exceljs";
 
 import { TRACK_HEADERS, type ExtractedOrderRow, type OutputPaths } from "../shared/types.js";
@@ -35,6 +35,11 @@ export async function writeXlsx(rows: ExtractedOrderRow[], outputs: OutputPaths)
   await wb.xlsx.writeFile(outputs.xlsxOutput);
 }
 
+export async function writeResultWorkbook(rows: ExtractedOrderRow[], outputs: OutputPaths): Promise<void> {
+  await Promise.all([removeOutputFile(outputs.csvOutput), removeOutputFile(outputs.auditOutput)]);
+  await writeXlsx(rows, outputs);
+}
+
 function csvCell(value: unknown): string {
   if (value === null || value === undefined) {
     return "";
@@ -49,4 +54,10 @@ function csvCell(value: unknown): string {
 async function mkdirParent(filePath: string): Promise<void> {
   const { dirname } = await import("node:path");
   await mkdir(dirname(filePath), { recursive: true });
+}
+
+async function removeOutputFile(filePath: string): Promise<void> {
+  if (filePath) {
+    await rm(filePath, { force: true });
+  }
 }

@@ -1,8 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import ExcelJS from "exceljs";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { loadRemoteEmailApiConfig, RemoteEmailApiClient } from "./remoteEmailApi.js";
@@ -112,9 +113,9 @@ describe("remote email API client", () => {
     expect(result.emailFetch.attachmentCount).toBe(1);
     expect(result.extraction.rows).toHaveLength(1);
     expect(result.extraction.outputs.outputDir).toBe(path.join(tempDir, "20260624-101112", "order_extraction_output"));
-    await expect(readFile(result.extraction.outputs.csvOutput, "utf8")).resolves.toContain("2026-06-24");
-    await expect(readFile(result.extraction.outputs.auditOutput, "utf8")).resolves.toContain("order.xlsx");
     await expect(readFile(result.extraction.outputs.xlsxOutput)).resolves.toBeTruthy();
+    await expect(stat(result.extraction.outputs.csvOutput)).rejects.toThrow();
+    await expect(stat(result.extraction.outputs.auditOutput)).rejects.toThrow();
   });
 
   test("uploads local files to remote extraction endpoint and writes local outputs", async () => {
@@ -146,7 +147,9 @@ describe("remote email API client", () => {
     expect(Buffer.from(received[0]?.body.files[0].contentBase64, "base64").toString("utf8")).toBe("excel-content");
     expect(result.inputFiles).toEqual([localFile]);
     expect(result.outputs.outputDir).toBe(path.join(tempDir, "order_extraction_output"));
-    await expect(readFile(result.outputs.csvOutput, "utf8")).resolves.toContain("PO-1");
+    await expect(readFile(result.outputs.xlsxOutput)).resolves.toBeTruthy();
+    await expect(stat(result.outputs.csvOutput)).rejects.toThrow();
+    await expect(stat(result.outputs.auditOutput)).rejects.toThrow();
   });
 
   test("sorts remote local extraction outputs by ideal delivery date", async () => {
@@ -174,9 +177,10 @@ describe("remote email API client", () => {
     const result = await client.extractLocal({ paths: [localFile], inferManual: true });
 
     expect(result.rows.map((row) => row.values[1])).toEqual(["EARLY", "LATE", "BLANK"]);
-    const csv = await readFile(result.outputs.csvOutput, "utf8");
-    expect(csv.indexOf(",EARLY,")).toBeLessThan(csv.indexOf(",LATE,"));
-    expect(csv.indexOf(",LATE,")).toBeLessThan(csv.indexOf(",BLANK,"));
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(result.outputs.xlsxOutput);
+    const worksheet = workbook.worksheets[0];
+    expect([2, 3, 4].map((rowNumber) => worksheet.getCell(rowNumber, 2).value)).toEqual(["EARLY", "LATE", "BLANK"]);
   });
 
   test("streams new-message events from remote event endpoint", async () => {

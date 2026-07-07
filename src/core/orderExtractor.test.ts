@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, utimes } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -1998,17 +1998,20 @@ describe("extractWorkbook", () => {
 });
 
 describe("runOrderExtraction", () => {
-  test("writes csv xlsx and audit outputs", async () => {
+  test("writes only the result workbook output", async () => {
     const filePath = path.join(tempRoot, "29698 order.xlsx");
     await makeWorksheetOrder(filePath);
+    const outputsDir = path.join(tempRoot, "order_extraction_output");
+    await mkdir(outputsDir, { recursive: true });
+    await writeFile(path.join(outputsDir, "extracted_job_rows.csv"), "old csv", "utf8");
+    await writeFile(path.join(outputsDir, "audit.csv"), "old audit", "utf8");
 
     const result = await runOrderExtraction([filePath]);
 
     expect(result.rows).toHaveLength(1);
-    expect(await stat(result.outputs.csvOutput)).toBeTruthy();
     expect(await stat(result.outputs.xlsxOutput)).toBeTruthy();
-    expect(await stat(result.outputs.auditOutput)).toBeTruthy();
-    expect(await readFile(result.outputs.csvOutput, "utf8")).toContain("PO-1");
+    await expect(stat(result.outputs.csvOutput)).rejects.toThrow();
+    await expect(stat(result.outputs.auditOutput)).rejects.toThrow();
   });
 
   test("fills estimated completion date when inferManual is enabled", async () => {
@@ -2033,9 +2036,6 @@ describe("runOrderExtraction", () => {
     const result = await runOrderExtraction([laterPath, blankPath, earlierPath]);
 
     expect(result.rows.map((row) => row.values[1])).toEqual(["EARLY", "LATE", "BLANK"]);
-    const csv = await readFile(result.outputs.csvOutput, "utf8");
-    expect(csv.indexOf(",EARLY,")).toBeLessThan(csv.indexOf(",LATE,"));
-    expect(csv.indexOf(",LATE,")).toBeLessThan(csv.indexOf(",BLANK,"));
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(result.outputs.xlsxOutput);
     const worksheet = workbook.worksheets[0];
