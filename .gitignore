@@ -48,3 +48,6 @@ tests/test_special_template_queue.py
 
 # CodeGraph local index
 .codegraph/
+
+# Isolated development worktrees
+.worktrees/
