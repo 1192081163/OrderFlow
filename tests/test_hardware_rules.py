@@ -995,6 +995,22 @@ def test_standard_worksheet_negative_qty_does_not_cancel_goods_qty(tmp_path: Pat
     assert row.values[19] == 1
 
 
+def test_standard_worksheet_keeps_deluxe_dry_lining_separate_from_deluxe(tmp_path: Path) -> None:
+    wb = worksheet_book()
+    ws = wb["Worksheet"]
+    for row_idx, qty, profile in (
+        (11, 13, "Deluxe Dry Lining"),
+        (12, 1, "Deluxe"),
+    ):
+        ws[f"A{row_idx}"] = "1.05mm Zincanneal"
+        ws[f"C{row_idx}"] = qty
+        ws[f"D{row_idx}"] = profile
+
+    row = extract.extract_workbook(save_workbook(wb, tmp_path / "30820 LA VIDA DELUXE DRY LINING.xlsx"), infer_manual=True)
+
+    assert row.values[10:14] == [13, "Deluxe Dry Lining", 1, "DELUXE"]
+
+
 def test_standard_worksheet_deluxe_cleats_ignores_negative_return_parts(tmp_path: Path) -> None:
     wb = worksheet_book()
     ws = wb["Worksheet"]
@@ -1024,7 +1040,7 @@ def test_standard_worksheet_deluxe_cleats_ignores_negative_return_parts(tmp_path
 
     row = extract.extract_workbook(save_workbook(wb, tmp_path / "30446 PRIME DELUXE DRY LINING + CLEATS.xlsx"), infer_manual=True)
 
-    assert row.values[10:12] == [1, "DELUXE"]
+    assert row.values[10:12] == [1, "Deluxe Dry Lining"]
     assert row.values[21] == 9
 
 

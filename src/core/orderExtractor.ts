@@ -284,11 +284,15 @@ export async function extractWorkbook(filePath: string, options: Pick<RunExtract
         classifyGoods(detail.profile, manualCheck, { allowProfileCodeFallback: false });
       }
       const goods = detail.goodsOverride !== undefined ? detail.goodsOverride : classifyGoods(detail.profile, manualCheck);
+      const goodsBucket =
+        worksheet.name === "Worksheet" && worksheetHasStandardDetailHeader(worksheet)
+          ? worksheetGoodsBucket(detail.profile, goods)
+          : goods;
       const cleatExtraParts = deluxeCleatsExtraParts(sourceFile, detail.profile, goods, detail.quantity);
       if (cleatExtraParts) {
         detail.vPartsExtra = (detail.vPartsExtra ?? 0) + cleatExtraParts;
       }
-      addGoods(goodsTotals, goods, detail.quantity);
+      addGoods(goodsTotals, goodsBucket, detail.quantity);
       if (options.inferManual) {
         addManualTotals(manualTotals, detail, goods);
       }
@@ -1137,6 +1141,13 @@ function deluxeCleatsExtraParts(sourceFile: string, profile: string, goods: stri
 function profileIsDeluxeDryLining(profile: string): boolean {
   const upper = cleanText(profile).toUpperCase();
   return upper.includes("DRY LINING") || upper.includes("DR LINING");
+}
+
+function worksheetGoodsBucket(profile: string, goods: string | null): string | null {
+  if (goods === "DELUXE" && profileIsDeluxeDryLining(profile)) {
+    return "Deluxe Dry Lining";
+  }
+  return goods;
 }
 
 function cavitySliderDefaultMaterial(profile: string): string | null {

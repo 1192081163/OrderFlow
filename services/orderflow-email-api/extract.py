@@ -1160,7 +1160,7 @@ def worksheet_goods_bucket(profile: Any, goods: str | None) -> str | None:
 
 def goods_output_type(goods: str) -> str:
     if goods == "DELUXE DRY LINING":
-        return "DELUXE"
+        return "Deluxe Dry Lining"
     return goods
 
 

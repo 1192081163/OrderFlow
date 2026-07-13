@@ -1631,9 +1631,24 @@ describe("extractWorkbook", () => {
     const python = await pythonReference(filePath);
     const typescript = await extractWorkbook(filePath, { inferManual: true });
 
+    expect(typescript.values.slice(10, 12)).toEqual([2, "Deluxe Dry Lining"]);
     expect(typescript.values.slice(10, 12)).toEqual(python.values.slice(10, 12));
     expect(typescript.values[19]).toEqual(python.values[19]);
     expect(typescript.manualCheck).toEqual(python.manualCheck);
+  });
+
+  test("keeps Worksheet Deluxe Dry Lining separate from plain Deluxe", async () => {
+    const filePath = path.join(tempRoot, "30820 LA VIDA DELUXE DRY LINING.xlsx");
+    await makeWorksheetOrderWithLines(filePath, [
+      { material: "1.05mm Zincanneal", qty: 13, profile: "Deluxe Dry Lining" },
+      { material: "1.05mm Zincanneal", qty: 1, profile: "Deluxe" },
+    ]);
+
+    const python = await pythonReference(filePath);
+    const typescript = await extractWorkbook(filePath, { inferManual: true });
+
+    expect(typescript.values.slice(10, 14)).toEqual([13, "Deluxe Dry Lining", 1, "DELUXE"]);
+    expect(typescript.values.slice(10, 14)).toEqual(python.values.slice(10, 14));
   });
 
   test("matches Python reference for Worksheet Deluxe cleats extra parts", async () => {
