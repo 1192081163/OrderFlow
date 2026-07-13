@@ -116,18 +116,13 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("requirements-python-runner.txt");
     expect(workflow).toContain("Write release build info");
     expect(workflow).toContain('export const CURRENT_RELEASE_TAG = "build-${{ github.run_number }}"');
-    expect(workflow).toContain("Write packaged remote email API config");
-    expect(workflow).toContain("ORDERFLOW_EMAIL_API_URL: ${{ vars.ORDERFLOW_EMAIL_API_URL }}");
-    expect(workflow).toContain("ORDERFLOW_EMAIL_API_TOKEN: ${{ secrets.ORDERFLOW_EMAIL_API_TOKEN }}");
-    expect(workflow).toContain("node scripts/write-remote-email-api-config.mjs");
+    expect(workflow).not.toContain("Write packaged remote email API config");
+    expect(workflow).not.toContain("ORDERFLOW_EMAIL_API_URL");
+    expect(workflow).not.toContain("ORDERFLOW_EMAIL_API_TOKEN");
+    expect(workflow).not.toContain("write-remote-email-api-config.mjs");
+    expect(workflow).toContain("Run local-only invariant");
     expect(workflow.indexOf("Write release build info")).toBeLessThan(workflow.indexOf("npm run dist:win:ci"));
-    expect(workflow.indexOf("Write packaged remote email API config")).toBeLessThan(
-      workflow.indexOf("npm run dist:win:ci"),
-    );
     expect(workflow.indexOf("Write release build info", workflow.indexOf("build-macos:"))).toBeLessThan(
-      workflow.indexOf("npm run dist:mac:ci"),
-    );
-    expect(workflow.indexOf("Write packaged remote email API config", workflow.indexOf("build-macos:"))).toBeLessThan(
       workflow.indexOf("npm run dist:mac:ci"),
     );
     expect(workflow).toContain("Cache Electron downloads");

@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-07-13):** Do not implement this remote design. Use `docs/superpowers/specs/2026-07-13-local-mail-workstation-design.md` and `docs/superpowers/plans/2026-07-13-local-mail-workstation.md`.
+
 # Email API Server Implementation Plan
 
 **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) superpowers:executing-plans implement plan task-by-task. Steps use checkbox (`- [ ]`) syntax tracking.

@@ -56,6 +56,9 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Run local-only invariant
+        run: npm test -- src/packaging/localOnlyInvariant.test.ts
+
   build-windows:
     name: Build Windows Portable EXE
     if: github.event_name != 'pull_request'
@@ -110,13 +113,6 @@ jobs:
         shell: pwsh
         run: |
           Set-Content -Path src/core/buildInfo.ts -Value 'export const CURRENT_RELEASE_TAG = "build-${{ github.run_number }}";'
-
-      - name: Write packaged remote email API config
-        shell: bash
-        env:
-          ORDERFLOW_EMAIL_API_URL: ${{ vars.ORDERFLOW_EMAIL_API_URL }}
-          ORDERFLOW_EMAIL_API_TOKEN: ${{ secrets.ORDERFLOW_EMAIL_API_TOKEN }}
-        run: node scripts/write-remote-email-api-config.mjs
 
       - name: Build Windows portable exe
         run: npm run dist:win:ci
@@ -181,13 +177,6 @@ jobs:
         shell: bash
         run: |
           printf 'export const CURRENT_RELEASE_TAG = "build-%s";\n' "${{ github.run_number }}" > src/core/buildInfo.ts
-
-      - name: Write packaged remote email API config
-        shell: bash
-        env:
-          ORDERFLOW_EMAIL_API_URL: ${{ vars.ORDERFLOW_EMAIL_API_URL }}
-          ORDERFLOW_EMAIL_API_TOKEN: ${{ secrets.ORDERFLOW_EMAIL_API_TOKEN }}
-        run: node scripts/write-remote-email-api-config.mjs
 
       - name: Build macOS dmg
         run: npm run dist:mac:ci

@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-07-13):** Do not implement this remote design. Use `docs/superpowers/specs/2026-07-13-local-mail-workstation-design.md` and `docs/superpowers/plans/2026-07-13-local-mail-workstation.md`.
+
 # Office Mail Gateway Design
 
 Date: 2026-07-10
