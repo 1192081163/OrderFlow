@@ -3,7 +3,6 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { RunExtractionOptions } from "./orderExtractor.js";
 import type { ExtractionResult, ProgressEvent, ProgressStatus } from "../shared/types.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -11,6 +10,12 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 interface PythonCommand {
   command: string;
   argsPrefix: string[];
+}
+
+export interface RunExtractionOptions {
+  recursive?: boolean;
+  inferManual?: boolean;
+  progress?: (event: ProgressEvent) => void;
 }
 
 export type OrderExtractionRunner = (paths: string[], options?: RunExtractionOptions) => Promise<ExtractionResult>;

@@ -2,6 +2,8 @@
 
 本文按输出表 `订单整理结果.xlsx` 的列顺序整理当前订单提取规则。规则来源于 `extract.py`、`desktop_runner.py` 和 `rules/` 目录下的 CSV 配置表。
 
+订单字段识别、分类和计算只在 Python 中实现。TypeScript 仅负责启动 Python 进程、传递参数和接收结果，不维护第二套提取规则。
+
 ## 适用范围
 
 - 支持输入 `.xlsx`、`.xlsm` 订单文件。
@@ -13,10 +15,7 @@
   - 只有 `Sheet1` 的结构。
 - 隐藏行不参与明细、数量、配件、超宽等计算。
 - 同一个 Job 重复出现时只保留最新版：优先按文件名里的版本号排序，没有版本号时按文件修改时间排序。
-- 输出目录固定为输入基准目录下的 `order_extraction_output/`，包含：
-  - `extracted_job_rows.csv`
-  - `订单整理结果.xlsx`
-  - `audit.csv`
+- 输出目录固定为输入基准目录下的 `order_extraction_output/`；桌面流程最终只保留 `订单整理结果.xlsx`。
 
 ## 按列规则
 
@@ -33,7 +32,7 @@
 | I | 空表头 | 当前不自动填写，保持空白。 |
 | J | `Material` | 从明细行或 Material 标签提取材料代码并合并去重。识别规则包括：`Zinc/Zincanneal` -> `Z`，`Galv/Galvanised/Galvanized` -> `G`，Colorbond 颜色或 `Colorbond/Colourbond` -> `CB`，`Stainless` -> `SS`，`Aluminium/Aluminum` -> `Aluminium`。厚度 `0.55` 归一为 `0.6`，`1.05` 归一为 `1`。多个材料按厚度和后缀排序后用 `/` 拼接。 |
 | K | `QTY` | Goods1 的数量。按产品类型汇总后，取数量最大的产品组；数量相同则保留源文件出现顺序。非正数数量不会冲减总数。 |
-| L | `Goods1` | Goods1 的产品类型。主要映射：Cavity/Slider/COWDROY/Closing Jamb -> `CS`；Service Part -> `PART`；Skin/Door Skin -> `DS`；Split -> `SPLIT`，Deluxe Split 或 `DL` -> `SPLIT DL`；Knock/KD -> `KD`；Modern -> `MODERN`；Deluxe -> `DELUXE`；Custom/Commercial 或常见商业 Profile 代码 -> `COMMERCIAL`；Capping -> `CAPPING`；Door Stop Build Up 文件 -> `CP`；Trad Dyna 文件 -> `COMMERCIAL`；Door Skin 文件中 Flat Sheet -> `DS`，Capping 行不自动回退成 Commercial。 |
+| L | `Goods1` | Goods1 的产品类型。主要映射：Cavity/Slider/COWDROY/Closing Jamb -> `CS`；Service Part -> `PART`；Skin/Door Skin -> `DS`；普通 Split 和原文为 `Deluxe Split` -> `SPLIT`，带独立 `DL` 标记的 Split -> `SPLIT DL`；Knock/KD -> `KD`；Modern -> `MODERN`；Deluxe -> `DELUXE`；Custom/Commercial 或常见商业 Profile 代码 -> `COMMERCIAL`；Capping -> `CAPPING`；Door Stop Build Up 文件 -> `CP`；Trad Dyna 文件 -> `COMMERCIAL`；Door Skin 文件中 Flat Sheet -> `DS`，Capping 行不自动回退成 Commercial。 |
 | M | `QTY` | Goods2 的数量。若存在第二个产品组，取第二大产品组数量。 |
 | N | `Goods2` | Goods2 的产品类型。若超过两个产品组，只输出前两个，并在 `manual_check` 中记录 `more than two goods groups found`。`rules/goods_ignore_patterns.csv` 中的描述不会成为 Goods，也不会产生未映射提示。 |
 | O | `Ideal D date` | 订单交期。`Worksheet` 用 `C5` 或 `Data!F2`；`Main Sheet`/`Sheet1` 优先找 `Delivery Date`、`Delivery D`、`Date` 标签，回退到 `B5`。支持 Excel 日期、`YYYY-MM-DD`、`DD/MM/YYYY`、`MM/DD/YYYY`。`Sheet1` 中无法解析的日期会写入 `manual_check`。 |
