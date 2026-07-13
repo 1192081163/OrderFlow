@@ -111,3 +111,41 @@ export interface UpdateCheckResult {
   reason: "current" | "newer_version" | "missing_asset" | "error";
   error?: string;
 }
+
+export type LocalMailRuntimeState = "stopped" | "connecting" | "connected" | "offline" | "attention_required";
+
+export interface LocalMailRuntimeStatus {
+  state: LocalMailRuntimeState;
+  detail: string;
+  lastSyncAt?: string;
+}
+
+export interface LocalMailSettingsView {
+  email: string;
+  hasAuthCode: boolean;
+  startAtLogin: boolean;
+}
+
+export interface SaveLocalMailSettingsInput {
+  email: string;
+  authCode?: string;
+  startAtLogin: boolean;
+}
+
+export interface LocalMailMessageSummary extends EmailMessageSummary {
+  extracted: boolean;
+}
+
+export interface LocalMailListResult extends Omit<EmailListResult, "messages"> {
+  messages: LocalMailMessageSummary[];
+  status: LocalMailRuntimeStatus;
+}
+
+export interface LocalEmailExtractionRequest {
+  messageUids: string[];
+  inferManual?: boolean;
+}
+
+export type LocalMailEvent =
+  | { type: "messages-updated"; data: { newMessageUids: string[]; list: LocalMailListResult } }
+  | { type: "status-changed"; data: LocalMailRuntimeStatus };
