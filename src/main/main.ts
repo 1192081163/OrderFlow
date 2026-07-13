@@ -45,12 +45,23 @@ app.whenReady().then(async () => {
       buildMenu: (template) => Menu.buildFromTemplate(template),
     },
     showWindow: lifecycle.showWindow,
-    reconnect: () => services.localMail.reconnect(),
+    reconnect: async () => {
+      try {
+        await services.localMail.reconnect();
+      } catch (error) {
+        console.warn("Tray reconnect failed", error);
+      }
+    },
     exit: async () => {
       lifecycle.allowQuit();
       tray.destroy();
-      await services.close();
-      app.quit();
+      try {
+        await services.close();
+      } catch (error) {
+        console.error("Failed to close local mail services", error);
+      } finally {
+        app.quit();
+      }
     },
   });
   await services.localMail.start();

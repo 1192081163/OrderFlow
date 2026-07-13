@@ -48,8 +48,11 @@ export async function createMainLocalMailServices(): Promise<MainLocalMailServic
     monitor,
     notify: (messages) => showOrderMailNotification(messages, notificationBindings),
     setStartAtLogin: (enabled) => app.setLoginItemSettings(loginItemSettings(enabled)),
+    reportBackgroundError: (error) => console.warn("Local mail background event failed", error),
   });
-  const resume = () => { void monitor.handleResume(); };
+  const resume = () => {
+    void monitor.handleResume().catch((error) => console.warn("Local mail resume scan failed", error));
+  };
   powerMonitor.on("resume", resume);
   const unsubscribe = localMail.subscribe(broadcastLocalMailEvent);
   return {

@@ -25,29 +25,32 @@ export interface LocalMailServiceDependencies {
   extract?: typeof extractEmailOrders;
   notify(messages: LocalMailMessageSummary[]): Promise<boolean>;
   setStartAtLogin(enabled: boolean): void;
+  reportBackgroundError?(error: unknown): void;
 }
 
 export class LocalMailService {
   private readonly subscribers = new Set<(event: LocalMailEvent) => void>();
   private readonly verify: typeof verifyImapConnection;
   private readonly extract: typeof extractEmailOrders;
+  private readonly reportBackgroundError: (error: unknown) => void;
   private unsubscribeMonitor?: () => void;
 
   constructor(private readonly dependencies: LocalMailServiceDependencies) {
     this.verify = dependencies.verify ?? verifyImapConnection;
     this.extract = dependencies.extract ?? extractEmailOrders;
+    this.reportBackgroundError = dependencies.reportBackgroundError ?? ((error) => console.warn("Local mail background event failed", error));
   }
 
   async start(): Promise<void> {
     if (!this.unsubscribeMonitor) {
       this.unsubscribeMonitor = this.dependencies.monitor.subscribe((event) => {
-        void this.handleMonitorEvent(event);
+        void this.handleMonitorEvent(event).catch(this.reportBackgroundError);
       });
     }
     const settings = await this.dependencies.credentials.loadView();
     this.dependencies.setStartAtLogin(settings.startAtLogin);
     if (settings.email && settings.hasAuthCode) {
-      await this.notifyUnnotified(settings.email);
+      await this.notifyUnnotifiedSafely(settings.email);
       await this.dependencies.monitor.start();
     }
   }
@@ -149,7 +152,7 @@ export class LocalMailService {
     }
     const credentials = await this.dependencies.credentials.loadCredentials();
     if (!event.initialSync) {
-      await this.notifyUnnotified(credentials.email);
+      await this.notifyUnnotifiedSafely(credentials.email);
     }
     await this.emitList(event.initialSync ? [] : event.messages.map((message) => message.uid));
   }
@@ -161,6 +164,14 @@ export class LocalMailService {
         email,
         unnotified.map((message) => message.uid),
       );
+    }
+  }
+
+  private async notifyUnnotifiedSafely(email: string): Promise<void> {
+    try {
+      await this.notifyUnnotified(email);
+    } catch (error) {
+      this.reportBackgroundError(error);
     }
   }
 

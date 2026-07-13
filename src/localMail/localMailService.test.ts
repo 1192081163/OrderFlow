@@ -52,6 +52,19 @@ describe("local mail service", () => {
     expect(fixture.notify).not.toHaveBeenCalled();
   });
 
+  test("keeps publishing the cache when a Windows notification fails", async () => {
+    const fixture = createFixture();
+    const events: string[] = [];
+    fixture.service.subscribe((event) => events.push(event.type));
+    await fixture.service.start();
+    fixture.store.listUnnotified.mockReturnValue([message("101")]);
+    fixture.notify.mockRejectedValueOnce(new Error("notification unavailable"));
+    fixture.emitMonitor({ type: "messages-synced", messages: [message("101")], initialSync: false });
+    await vi.waitFor(() => expect(events).toContain("messages-updated"));
+    expect(fixture.reportBackgroundError).toHaveBeenCalledWith(expect.objectContaining({ message: "notification unavailable" }));
+    expect(fixture.store.markNotified).not.toHaveBeenCalled();
+  });
+
   test("extracts only explicitly selected UIDs and marks success", async () => {
     const fixture = createFixture();
     await fixture.service.extractEmail({ messageUids: ["101"], inferManual: true });
@@ -107,6 +120,7 @@ function createFixture() {
   const extract = vi.fn(async (): Promise<EmailExtractionResult> => emailExtractionResult([]));
   const notify = vi.fn(async () => true);
   const setStartAtLogin = vi.fn();
+  const reportBackgroundError = vi.fn();
   const dependencies: LocalMailServiceDependencies = {
     credentials,
     store,
@@ -115,6 +129,7 @@ function createFixture() {
     extract,
     notify,
     setStartAtLogin,
+    reportBackgroundError,
   };
   return {
     dependencies,
@@ -126,6 +141,7 @@ function createFixture() {
     extract,
     notify,
     setStartAtLogin,
+    reportBackgroundError,
     emitMonitor(event: LocalMailboxMonitorEvent) {
       monitorSubscriber?.(event);
     },
