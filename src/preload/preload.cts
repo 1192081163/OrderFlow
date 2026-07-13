@@ -23,7 +23,7 @@ export interface OrderOrganizerApi {
   extractEmail: (request: LocalEmailExtractionRequest) => Promise<EmailExtractionResult>;
   onLocalMailEvent: (callback: (event: LocalMailEvent) => void) => () => void;
   checkUpdates: () => Promise<UpdateCheckResult>;
-  downloadAndOpenUpdate: (update: UpdateCheckResult) => Promise<string>;
+  downloadAndOpenUpdate: () => Promise<string>;
   openPath: (targetPath: string) => Promise<void>;
   onProgress: (callback: (event: ProgressEvent) => void) => () => void;
 }
@@ -45,7 +45,7 @@ const api: OrderOrganizerApi = {
     return () => ipcRenderer.off("local-mail:event", listener);
   },
   checkUpdates: () => ipcRenderer.invoke("updates:check"),
-  downloadAndOpenUpdate: (update) => ipcRenderer.invoke("updates:download-and-open", update),
+  downloadAndOpenUpdate: () => ipcRenderer.invoke("updates:download-and-open"),
   openPath: (targetPath) => ipcRenderer.invoke("shell:open-path", targetPath),
   onProgress: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: ProgressEvent) => {

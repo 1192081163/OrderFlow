@@ -102,10 +102,11 @@ describe("renderer React stack", () => {
     expect(appSource).toContain("messageUids");
     expect(appSource).toContain("listEmails");
     expect(appSource).toContain("onLocalMailEvent");
+    expect(appSource).toContain("本地邮箱初始化失败");
     expect(appSource).not.toContain("subscribeEmailUpdates");
     expect(appSource).not.toContain("onEmailUpdate");
     expect(appSource).toContain("正在下载新版程序");
-expect(appSource).toContain("api.downloadAndOpenUpdate(result)");
+expect(appSource).toContain("api.downloadAndOpenUpdate()");
 expect(appSource).toContain("新版程序已启动");
 expect(appSource).not.toContain("下载地址：");
     expect(stylesSource).toContain(".failure-list");

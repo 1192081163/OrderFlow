@@ -131,12 +131,18 @@ function App() {
     const removeMailEvent = api.onLocalMailEvent((event) => {
       setMailView((current) => applyLocalMailEvent(current, event));
     });
-    void Promise.all([api.loadMailSettings(), api.listEmails()]).then(([saved, list]) => {
-      setSettings(saved);
-      setEmail(saved.email);
-      setSettingsHidden(saved.hasAuthCode);
-      setMailView({ list, newMessageUids: new Set(), status: list.status });
-    });
+    void Promise.all([api.loadMailSettings(), api.listEmails()])
+      .then(([saved, list]) => {
+        setSettings(saved);
+        setEmail(saved.email);
+        setSettingsHidden(saved.hasAuthCode);
+        setMailView({ list, newMessageUids: new Set(), status: list.status });
+      })
+      .catch((error) => {
+        const detail = `本地邮箱初始化失败：${error instanceof Error ? error.message : String(error)}`;
+        appendLog(detail);
+        setMailView((current) => ({ ...current, status: { state: "offline", detail } }));
+      });
     return () => { removeProgress(); removeMailEvent(); };
   }, [appendLog]);
 
@@ -287,7 +293,7 @@ function App() {
       if (result.updateAvailable && result.downloadUrl) {
         setSummary(`发现新版本 ${result.latestVersion ?? ""}，正在下载新版程序。`);
         appendLog(`正在下载新版程序：${result.assetName ?? "新版 exe"}`);
-        const executablePath = await api.downloadAndOpenUpdate(result);
+        const executablePath = await api.downloadAndOpenUpdate();
         appendLog(`新版程序已启动：${executablePath}`);
         setSummary("新版程序已启动，正在关闭当前版本。");
         return;

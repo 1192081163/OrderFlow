@@ -1,7 +1,7 @@
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 
 import { checkForUpdates, downloadUpdateExecutable } from "../core/updateChecker.js";
-import type { LocalEmailExtractionRequest, ProgressEvent, SaveLocalMailSettingsInput, UpdateCheckResult } from "../shared/types.js";
+import type { LocalEmailExtractionRequest, ProgressEvent, SaveLocalMailSettingsInput } from "../shared/types.js";
 import type { LocalMailService } from "../localMail/localMailService.js";
 import { extractDesktopLocalOrders } from "./emailActions.js";
 
@@ -27,11 +27,15 @@ export function registerIpcHandlers(dependencies: {
 
   ipcMain.handle("updates:check", async () => checkForUpdates());
 
-  ipcMain.handle("updates:download-and-open", async (_event, update: UpdateCheckResult): Promise<string> => {
+  ipcMain.handle("updates:download-and-open", async (): Promise<string> => {
     if (process.platform !== "win32") {
       throw new Error("自动打开新版仅支持 Windows 便携版 exe，请在 Windows 电脑上更新。");
     }
 
+    const update = await checkForUpdates();
+    if (!update.updateAvailable) {
+      throw new Error(update.error || "当前没有可下载的新版本。");
+    }
     const executablePath = await downloadUpdateExecutable(update, app.getPath("downloads"));
     const errorMessage = await shell.openPath(executablePath);
     if (errorMessage) {

@@ -99,12 +99,12 @@ describe("update checker", () => {
         currentVersion: "1.0.0",
         latestVersion: "1.2.0",
         assetName: WINDOWS_ASSET_NAME,
-        downloadUrl: "https://download.example/app.exe",
+        downloadUrl: "https://github.com/1192081163/OrderFlow/releases/download/build-124/orderflow-desktop-windows.exe",
         reason: "newer_version",
       },
       downloadDir,
       async (url, init) => {
-        expect(url).toBe("https://download.example/app.exe");
+        expect(url).toBe("https://github.com/1192081163/OrderFlow/releases/download/build-124/orderflow-desktop-windows.exe");
       expect(JSON.stringify(init?.headers)).toContain("orderflow-desktop/");
         return new Response(new TextEncoder().encode("new executable"));
       },
@@ -130,5 +130,31 @@ describe("update checker", () => {
         downloadDir,
       ),
     ).rejects.toThrow("更新文件不存在");
+  });
+
+  test("rejects update downloads outside the official GitHub repository", async () => {
+    const downloadDir = await mkdtemp(path.join(os.tmpdir(), "orderflow-update-"));
+    tempDirs.push(downloadDir);
+
+    await expect(downloadUpdateExecutable({
+      updateAvailable: true,
+      currentVersion: "1.0.0",
+      assetName: WINDOWS_ASSET_NAME,
+      downloadUrl: "https://download.example/app.exe",
+      reason: "newer_version",
+    }, downloadDir, async () => new Response("unsafe"))).rejects.toThrow("非官方地址");
+  });
+
+  test("rejects update downloads with an unexpected executable name", async () => {
+    const downloadDir = await mkdtemp(path.join(os.tmpdir(), "orderflow-update-"));
+    tempDirs.push(downloadDir);
+
+    await expect(downloadUpdateExecutable({
+      updateAvailable: true,
+      currentVersion: "1.0.0",
+      assetName: "other.exe",
+      downloadUrl: "https://github.com/1192081163/OrderFlow/releases/download/build-124/other.exe",
+      reason: "newer_version",
+    }, downloadDir, async () => new Response("unsafe"))).rejects.toThrow("文件名不正确");
   });
 });

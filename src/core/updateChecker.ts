@@ -103,6 +103,10 @@ export async function downloadUpdateExecutable(
   if (!update.updateAvailable || !update.downloadUrl || !update.assetName) {
     throw new Error("更新文件不存在，请稍后重试或手动下载新版 exe。");
   }
+  if (update.assetName !== WINDOWS_ASSET_NAME) {
+    throw new Error("更新文件名不正确，已拒绝下载。");
+  }
+  assertOfficialDownloadUrl(update.downloadUrl);
 
   await mkdir(downloadDir, { recursive: true });
   const executablePath = await uniquePath(path.join(downloadDir, update.assetName));
@@ -143,9 +147,22 @@ function selectWindowsAsset(assets: unknown): ReleaseAsset | null {
   return (
     (assets as ReleaseAsset[]).find((asset) => {
       const name = String(asset.name ?? "");
-      return name === WINDOWS_ASSET_NAME || name.toLowerCase().endsWith(".exe");
+      return name === WINDOWS_ASSET_NAME;
     }) ?? null
   );
+}
+
+function assertOfficialDownloadUrl(value: string): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("更新下载地址无效，已拒绝下载。");
+  }
+  const officialPath = /^\/1192081163\/(?:orderflow-desktop|OrderFlow)\/releases\/download\//i;
+  if (url.protocol !== "https:" || url.hostname !== "github.com" || !officialPath.test(url.pathname)) {
+    throw new Error("更新文件来自非官方地址，已拒绝下载。");
+  }
 }
 
 async function uniquePath(filePath: string): Promise<string> {

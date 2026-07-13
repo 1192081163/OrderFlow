@@ -48,13 +48,16 @@ jobs:
         run: npm ci
 
       - name: Install Python runner dependencies
-        run: python -m pip install -r requirements-python-runner.txt
+        run: python -m pip install -r requirements-python-runner.txt pytest
 
       - name: Typecheck
         run: npm run typecheck
 
       - name: Run tests
         run: npm test
+
+      - name: Run Python rule regression tests
+        run: python -m pytest -q tests/test_desktop_runner.py tests/test_hardware_rules.py tests/test_jobtrack_compare.py
 
       - name: Run local-only invariant
         run: npm test -- src/packaging/localOnlyInvariant.test.ts

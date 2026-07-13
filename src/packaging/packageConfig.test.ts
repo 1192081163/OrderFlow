@@ -114,6 +114,7 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("cache: pip");
     expect(workflow).toContain("npm ci");
     expect(workflow).toContain("requirements-python-runner.txt");
+    expect(workflow).toContain("python -m pytest -q tests/test_desktop_runner.py tests/test_hardware_rules.py tests/test_jobtrack_compare.py");
     expect(workflow).toContain("Write release build info");
     expect(workflow).toContain('export const CURRENT_RELEASE_TAG = "build-${{ github.run_number }}"');
     expect(workflow).not.toContain("Write packaged remote email API config");

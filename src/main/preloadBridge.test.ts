@@ -56,4 +56,15 @@ describe("Electron preload bridge", () => {
     expect(mainSource).toContain("createTrayController");
     expect(mainSource).not.toContain('app.on("window-all-closed"');
   });
+
+  test("keeps update URLs inside the main process", async () => {
+    const [preloadSource, ipcSource] = await Promise.all([
+      readFile(path.join(root, "src/preload/preload.cts"), "utf8"),
+      readFile(path.join(root, "src/main/ipcHandlers.ts"), "utf8"),
+    ]);
+    expect(preloadSource).toContain("downloadAndOpenUpdate: () =>");
+    expect(preloadSource).toContain('ipcRenderer.invoke("updates:download-and-open")');
+    expect(preloadSource).not.toContain('"updates:download-and-open", update');
+    expect(ipcSource).toContain("const update = await checkForUpdates()");
+  });
 });
