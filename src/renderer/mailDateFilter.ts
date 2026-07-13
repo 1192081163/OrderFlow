@@ -2,11 +2,11 @@ import type { EmailMessageSummary } from "../shared/types.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function filterMessagesForMailDay(
-  messages: EmailMessageSummary[],
+export function filterMessagesForMailDay<T extends EmailMessageSummary>(
+  messages: T[],
   dayOffset: number,
   now = new Date(),
-): EmailMessageSummary[] {
+): T[] {
   const targetKey = localDateKey(dayForOffset(dayOffset, now));
   return messages.filter((message) => message.date && localDateKey(new Date(message.date)) === targetKey);
 }

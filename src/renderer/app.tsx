@@ -17,65 +17,60 @@ import { createRoot } from "react-dom/client";
 import type { EmailExtractionResult } from "../core/extractionService.js";
 import type { OrderOrganizerApi } from "../preload/preload.cjs";
 import type {
-  EmailMessageSummary,
-  EmailNewMessagesEvent,
   ExtractionFailure,
   ExtractionResult,
+  LocalMailListResult,
+  LocalMailMessageSummary,
+  LocalMailRuntimeStatus,
+  LocalMailSettingsView,
   OutputPaths,
   ProgressEvent,
 } from "../shared/types.js";
-import {
-  buildNewOrderEmailNotification,
-  findNewPendingOrderMessages,
-  mergeSeenMessageUids,
-} from "./mailNotifications.js";
 import {
   canMoveToNextMailDay,
   canMoveToPreviousMailDay,
   filterMessagesForMailDay,
   formatMailDayTitle,
 } from "./mailDateFilter.js";
-import { loadExtractedMessageUids, mergeExtractedMessageUids } from "./mailExtractionState.js";
+import {
+  applyLocalMailEvent,
+  connectionBadge,
+  emptyMailCopy,
+  type LocalMailRendererState,
+} from "./localMailViewState.js";
 
 const bridgeMissing = !window.orderOrganizer && window.location.protocol === "file:";
 const api: OrderOrganizerApi = window.orderOrganizer ?? createPreviewApi();
-const DEFAULT_IMAP_SERVER = "imap.exmail.qq.com";
-const DEFAULT_IMAP_PORT = 993;
 const EMAIL_LIST_DAYS = 7;
-const AUTO_REFRESH_MS = 5 * 60 * 1000;
 const BRIDGE_MISSING_MESSAGE = "桌面接口加载失败，请重启应用。";
-
-interface MailListStats {
-  scannedMessages: number;
-}
+const STOPPED_STATUS: LocalMailRuntimeStatus = { state: "stopped", detail: "请先登录企业邮箱" };
 
 function App() {
   const [email, setEmail] = useState("");
-  const [authCode, setAuthCode] = useState("");
+  const [authCodeInput, setAuthCodeInput] = useState("");
+  const [settings, setSettings] = useState<LocalMailSettingsView>({ email: "", hasAuthCode: false, startAtLogin: true });
   const [settingsHidden, setSettingsHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mailLoading, setMailLoading] = useState(false);
   const [summary, setSummary] = useState(bridgeMissing ? "桌面接口未连接" : "尚未开始");
-  const [mailStatus, setMailStatus] = useState("保存邮箱后加载今日邮件");
-  const [emailMessages, setEmailMessages] = useState<EmailMessageSummary[]>([]);
-  const [mailListStats, setMailListStats] = useState<MailListStats | null>(null);
+  const [mailView, setMailView] = useState<LocalMailRendererState>({
+    list: undefined,
+    newMessageUids: new Set(),
+    status: STOPPED_STATUS,
+  });
   const [mailDayOffset, setMailDayOffset] = useState(0);
   const [selectedMessageUids, setSelectedMessageUids] = useState<Set<string>>(() => new Set());
-  const [extractedMessageUids, setExtractedMessageUids] = useState<Set<string>>(() => new Set());
-  const [newMessageUids, setNewMessageUids] = useState<Set<string>>(() => new Set());
   const [progress, setProgress] = useState(0);
   const [latestOutputs, setLatestOutputs] = useState<OutputPaths | null>(null);
   const [resultFailures, setResultFailures] = useState<ExtractionFailure[]>([]);
   const [logLines, setLogLines] = useState<string[]>([]);
   const logRef = useRef<HTMLPreElement | null>(null);
   const mailRefreshInFlight = useRef(false);
-  const seenMessageUids = useRef<Set<string>>(new Set());
-  const hasLoadedMailbox = useRef(false);
-  const mailboxKey = useRef("");
-  const emailMessagesRef = useRef<EmailMessageSummary[]>([]);
-  const extractedMessageUidsRef = useRef<Set<string>>(new Set());
 
-  const canUseEmail = Boolean(email.trim() && authCode.trim() && !bridgeMissing);
+  const emailMessages = mailView.list?.messages ?? [];
+  const runtimeStatus = mailView.status;
+  const badge = connectionBadge(runtimeStatus);
+  const canUseEmail = settings.hasAuthCode && !bridgeMissing;
   const visibleEmailMessages = useMemo(
     () => filterMessagesForMailDay(emailMessages, mailDayOffset),
     [emailMessages, mailDayOffset],
@@ -91,180 +86,58 @@ function App() {
     [visibleEmailMessages, selectedMessageUids],
   );
   const pendingCount = useMemo(
-    () => visibleEmailMessages.filter((message) => message.hasExcelAttachments && !extractedMessageUids.has(message.uid)).length,
-    [visibleEmailMessages, extractedMessageUids],
+    () => visibleEmailMessages.filter((message) => message.hasExcelAttachments && !message.extracted).length,
+    [visibleEmailMessages],
   );
   const visibleAttachmentCount = useMemo(
     () => visibleEmailMessages.reduce((sum, message) => sum + message.attachmentCount, 0),
     [visibleEmailMessages],
   );
-  const visibleMailStatus = mailListStats
-    ? `${mailDayTitle}：候选邮件 ${visibleEmailMessages.length} 封，待提取 ${pendingCount} 封，Excel 候选附件 ${visibleAttachmentCount} 个；近一周扫描 ${mailListStats.scannedMessages} 封`
-    : mailStatus;
+  const visibleMailStatus = mailView.list
+    ? `${mailDayTitle}：订单邮件 ${visibleEmailMessages.length} 封，待提取 ${pendingCount} 封，Excel 附件 ${visibleAttachmentCount} 个；近一周扫描 ${mailView.list.scannedMessages} 封`
+    : runtimeStatus.detail;
 
   const appendLog = useCallback((line: string) => {
     const stamp = new Date().toLocaleTimeString("zh-CN", { hour12: false });
     setLogLines((current) => [...current, `[${stamp}] ${line}`].slice(-200));
   }, []);
 
-  useEffect(() => {
-    emailMessagesRef.current = emailMessages;
-  }, [emailMessages]);
+  const applyList = useCallback((list: LocalMailListResult): void => {
+    setMailView((current) => ({ ...current, list, status: list.status }));
+  }, []);
+
+  const loadCachedEmails = useCallback(async (): Promise<void> => {
+    applyList(await api.listEmails());
+  }, [applyList]);
+
+  const refreshEmails = useCallback(async (): Promise<void> => {
+    if (!canUseEmail || mailRefreshInFlight.current) return;
+    mailRefreshInFlight.current = true;
+    setMailLoading(true);
+    try {
+      const refreshed = await api.refreshEmails();
+      applyList(refreshed);
+      appendLog(`邮件列表已刷新：${refreshed.messages.length} 封订单邮件`);
+    } catch (error) {
+      appendLog(`邮件刷新失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      mailRefreshInFlight.current = false;
+      setMailLoading(false);
+    }
+  }, [appendLog, applyList, canUseEmail]);
 
   useEffect(() => {
-    extractedMessageUidsRef.current = extractedMessageUids;
-  }, [extractedMessageUids]);
-
-  const refreshEmails = useCallback(
-    async (mode: "manual" | "auto" = "manual", override?: { email: string; authCode: string }): Promise<void> => {
-      const currentEmail = (override?.email ?? email).trim();
-      const currentAuthCode = (override?.authCode ?? authCode).trim();
-
-      if (!currentEmail || !currentAuthCode) {
-        setMailListStats(null);
-        setMailStatus("填写邮箱和授权码后可加载今日邮件");
-        return;
-      }
-      if (bridgeMissing || mailRefreshInFlight.current) {
-        return;
-      }
-
-        const currentMailboxKey = currentEmail.toLowerCase();
-        const mailboxChanged = mailboxKey.current !== currentMailboxKey;
-        const activeExtractedMessageUids = mailboxChanged ? loadExtractedMessageUids(window.localStorage, currentEmail) : extractedMessageUids;
-        if (mailboxChanged) {
-          mailboxKey.current = currentMailboxKey;
-          seenMessageUids.current = new Set();
-          hasLoadedMailbox.current = false;
-          setNewMessageUids(new Set());
-          setExtractedMessageUids(activeExtractedMessageUids);
-          setMailListStats(null);
-          setMailDayOffset(0);
-        }
-
-      mailRefreshInFlight.current = true;
-      setMailLoading(true);
-      if (mode === "manual") {
-        setMailStatus("正在刷新近一周邮件");
-      }
-
-      try {
-        const result = await api.listEmails({
-          email: currentEmail,
-          authCode: currentAuthCode,
-          server: DEFAULT_IMAP_SERVER,
-          port: DEFAULT_IMAP_PORT,
-          days: EMAIL_LIST_DAYS,
-        });
-        const sortedMessages = sortMessages(result.messages);
-        const validUids = new Set(sortedMessages.filter((message) => message.hasExcelAttachments).map((message) => message.uid));
-        const candidateAttachmentCount =
-          result.orderAttachmentCount ?? sortedMessages.reduce((sum, message) => sum + message.attachmentCount, 0);
-        const mailboxWasLoaded = hasLoadedMailbox.current;
-        const newPendingMessages = findNewPendingOrderMessages(sortedMessages, seenMessageUids.current, activeExtractedMessageUids);
-        const shouldAlertNewMessages = mailboxWasLoaded && newPendingMessages.length > 0;
-        const baseMailStatus = `近一周扫描 ${result.scannedMessages} 封，候选邮件 ${sortedMessages.length} 封，Excel 候选附件 ${candidateAttachmentCount} 个`;
-
-        seenMessageUids.current = mergeSeenMessageUids(seenMessageUids.current, sortedMessages);
-        hasLoadedMailbox.current = true;
-
-        setEmailMessages(sortedMessages);
-        setMailListStats({
-          scannedMessages: result.scannedMessages,
-        });
-        setSelectedMessageUids((current) => new Set([...current].filter((uid) => validUids.has(uid) && !activeExtractedMessageUids.has(uid))));
-        setNewMessageUids((current) => {
-          const next = new Set([...current].filter((uid) => validUids.has(uid) && !activeExtractedMessageUids.has(uid)));
-          if (shouldAlertNewMessages) {
-            newPendingMessages.forEach((message) => next.add(message.uid));
-          }
-          return next;
-        });
-        setMailStatus(shouldAlertNewMessages ? `发现 ${newPendingMessages.length} 封新候选邮件，${baseMailStatus}` : baseMailStatus);
-        if (shouldAlertNewMessages) {
-          const notification = buildNewOrderEmailNotification(newPendingMessages);
-          appendLog(`发现新候选邮件：${newPendingMessages.map((message) => message.subject || "(无主题)").join(" / ")}`);
-          void api
-            .notifyNewOrderEmails(notification)
-            .then((shown) => {
-              if (!shown) {
-                appendLog("系统通知不可用，已在邮件列表中标记新邮件");
-              }
-            })
-            .catch((error) => {
-              const message = error instanceof Error ? error.message : String(error);
-              appendLog(`系统通知失败：${message}`);
-            });
-        }
-        if (mode === "manual") {
-          appendLog(`邮件列表已刷新：${sortedMessages.length} 封，待提取 ${pendingCountFrom(sortedMessages, activeExtractedMessageUids)} 封`);
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setMailStatus(`邮件刷新失败：${message}`);
-        if (mode === "manual") {
-          appendLog(`邮件刷新失败：${message}`);
-        }
-      } finally {
-        mailRefreshInFlight.current = false;
-        setMailLoading(false);
-      }
-    },
-    [appendLog, authCode, email, extractedMessageUids],
-  );
-
-  const handleEmailUpdate = useCallback(
-    (event: EmailNewMessagesEvent): void => {
-      const currentEmail = email.trim().toLowerCase();
-      if (!currentEmail || event.email.trim().toLowerCase() !== currentEmail) {
-        return;
-      }
-
-      const currentMessages = emailMessagesRef.current;
-      const extractedUids = extractedMessageUidsRef.current;
-      const currentUids = new Set(currentMessages.map((message) => message.uid));
-      const incomingMessages = sortMessages(event.messages);
-      const newPendingMessages = incomingMessages.filter(
-        (message) => !currentUids.has(message.uid) && message.hasExcelAttachments && !extractedUids.has(message.uid),
-      );
-      if (newPendingMessages.length === 0) {
-        return;
-      }
-
-      seenMessageUids.current = mergeSeenMessageUids(seenMessageUids.current, newPendingMessages);
-      hasLoadedMailbox.current = true;
-      setEmailMessages((current) => {
-        const incomingUids = new Set(incomingMessages.map((message) => message.uid));
-        return sortMessages([...incomingMessages, ...current.filter((message) => !incomingUids.has(message.uid))]);
-      });
-      setNewMessageUids((current) => {
-        const next = new Set(current);
-        newPendingMessages.forEach((message) => next.add(message.uid));
-        return next;
-      });
-      setMailStatus(`服务器推送 ${newPendingMessages.length} 封新候选邮件`);
-      appendLog(`服务器推送新候选邮件：${newPendingMessages.map((message) => message.subject || "(无主题)").join(" / ")}`);
-
-      const notification = buildNewOrderEmailNotification(newPendingMessages);
-      void api.notifyNewOrderEmails(notification).catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        appendLog(`系统通知失败：${message}`);
-      });
-    },
-    [appendLog, email],
-  );
-
-  useEffect(() => {
-    const removeProgressListener = api.onProgress((event) => renderProgress(event, appendLog, setProgress));
-    void api.loadSettings().then((settings) => {
-      setEmail(settings.email);
-      setAuthCode(settings.authCode);
-      if (settings.email.trim()) {
-        setExtractedMessageUids(loadExtractedMessageUids(window.localStorage, settings.email));
-      }
-      setSettingsHidden(Boolean(settings.email && settings.authCode));
+    const removeProgress = api.onProgress((event) => renderProgress(event, appendLog, setProgress));
+    const removeMailEvent = api.onLocalMailEvent((event) => {
+      setMailView((current) => applyLocalMailEvent(current, event));
     });
-    return removeProgressListener;
+    void Promise.all([api.loadMailSettings(), api.listEmails()]).then(([saved, list]) => {
+      setSettings(saved);
+      setEmail(saved.email);
+      setSettingsHidden(saved.hasAuthCode);
+      setMailView({ list, newMessageUids: new Set(), status: list.status });
+    });
+    return () => { removeProgress(); removeMailEvent(); };
   }, [appendLog]);
 
   useEffect(() => {
@@ -272,36 +145,6 @@ function App() {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [logLines]);
-
-  useEffect(() => {
-    if (!canUseEmail) {
-      return;
-    }
-
-    const removeEmailUpdateListener = api.onEmailUpdate(handleEmailUpdate);
-    void api.subscribeEmailUpdates().then((subscribed) => {
-      if (subscribed) {
-        appendLog("服务器实时邮件提醒已连接");
-      }
-    });
-
-    return () => {
-      removeEmailUpdateListener();
-      void api.unsubscribeEmailUpdates();
-    };
-  }, [appendLog, canUseEmail, handleEmailUpdate]);
-
-  useEffect(() => {
-    if (!canUseEmail) {
-      return;
-    }
-
-    void refreshEmails("auto");
-    const timer = window.setInterval(() => {
-      void refreshEmails("auto");
-    }, AUTO_REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, [canUseEmail, refreshEmails]);
 
   async function runUiTask(task: () => Promise<void>): Promise<void> {
     if (bridgeMissing) {
@@ -349,12 +192,24 @@ function App() {
 
   async function saveSettings(): Promise<void> {
     await runUiTask(async () => {
-      const saved = await api.saveSettings({ email, authCode });
+      const saved = await api.saveMailSettings({
+        email,
+        ...(authCodeInput.trim() ? { authCode: authCodeInput.trim() } : {}),
+        startAtLogin: true,
+      });
+      setSettings(saved);
       setEmail(saved.email);
-      setAuthCode(saved.authCode);
-      setSettingsHidden(Boolean(saved.email && saved.authCode));
-      appendLog("邮箱设置已保存");
-      await refreshEmails("manual", saved);
+      setAuthCodeInput("");
+      setSettingsHidden(saved.hasAuthCode);
+      appendLog("邮箱登录成功，授权码已由 Windows DPAPI 加密保存");
+      await loadCachedEmails();
+    });
+  }
+
+  async function reconnectEmail(): Promise<void> {
+    await runUiTask(async () => {
+      await api.reconnectEmail();
+      appendLog("正在重新连接企业邮箱");
     });
   }
 
@@ -369,30 +224,21 @@ function App() {
   async function extractEmailMessages(messageUids: string[]): Promise<void> {
     await runUiTask(async () => {
       resetResult();
-      appendLog(`已选择 ${messageUids.length} 封邮件`);
       setSummary("正在下载选中邮件附件");
+      appendLog(`已选择 ${messageUids.length} 封邮件`);
       appendLog("正在下载选中邮件附件");
-      const result = await api.extractEmail({
-        email,
-        authCode,
-        server: DEFAULT_IMAP_SERVER,
-        port: DEFAULT_IMAP_PORT,
-        hours: EMAIL_LIST_DAYS * 24,
-        messageUids,
-        inferManual: true,
-      });
+      const result = await api.extractEmail({ messageUids, inferManual: true });
       renderEmailResult(result);
-      const nextExtractedMessageUids = mergeExtractedMessageUids(window.localStorage, email, messageUids);
-      setExtractedMessageUids(nextExtractedMessageUids);
+      applyList(await api.listEmails());
       setSelectedMessageUids((current) => {
         const next = new Set(current);
         messageUids.forEach((uid) => next.delete(uid));
         return next;
       });
-      setNewMessageUids((current) => {
-        const next = new Set(current);
-        messageUids.forEach((uid) => next.delete(uid));
-        return next;
+      setMailView((current) => {
+        const nextNew = new Set(current.newMessageUids);
+        messageUids.forEach((uid) => nextNew.delete(uid));
+        return { ...current, newMessageUids: nextNew };
       });
     });
   }
@@ -474,7 +320,7 @@ function App() {
     setSelectedMessageUids(
       new Set(
         visibleEmailMessages
-          .filter((message) => message.hasExcelAttachments && !extractedMessageUids.has(message.uid))
+          .filter((message) => message.hasExcelAttachments && !message.extracted)
           .map((message) => message.uid),
       ),
     );
@@ -506,17 +352,20 @@ function App() {
             <div className="mail-command-status">
               <h1>订单提取</h1>
               <div className="connection-row">
-                <Badge className="connection-badge" appearance="tint" color={email && authCode ? "success" : "subtle"}>
-                  {email && authCode ? "已连接" : "未连接"}
+                <Badge className="connection-badge" appearance="tint" color={badge.color}>
+                  {badge.label}
                 </Badge>
                 <span className="connected-email">{email || "未设置邮箱"}</span>
               </div>
             </div>
             <div className="mail-command-actions">
-              <Button appearance="primary" disabled={busy || mailLoading || !canUseEmail} onClick={() => void refreshEmails("manual")}>
+              <Button appearance="primary" disabled={busy || mailLoading || !canUseEmail} onClick={() => void refreshEmails()}>
                 刷新邮件
               </Button>
               <div className="secondary-command-actions" aria-label="次要操作">
+                <Button size="small" appearance="subtle" className="quiet-command-button" disabled={busy || !canUseEmail} onClick={reconnectEmail}>
+                  重新连接
+                </Button>
                 <Button size="small" appearance="subtle" className="quiet-command-button" disabled={busy || bridgeMissing} onClick={checkUpdates}>
                   检查更新
                 </Button>
@@ -533,6 +382,10 @@ function App() {
             </div>
           </div>
         </Card>
+
+        <div className={`mail-runtime-banner ${runtimeStatus.state === "offline" ? "offline" : runtimeStatus.state === "attention_required" ? "attention" : ""}`}>
+          {runtimeStatus.detail}
+        </div>
 
         <div className="workspace">
           <Card className="surface mail-list-panel">
@@ -566,7 +419,7 @@ function App() {
                     </Button>
                   </div>
                 </div>
-                <div className="section-subtitle">按发生时间排序，每 5 分钟自动刷新。</div>
+                <div className="section-subtitle">固定显示最近 7 天，本机后台实时监听。</div>
               </div>
               <Badge appearance="tint" color={pendingCount > 0 ? "warning" : "success"}>
                 待提取 {pendingCount}
@@ -586,17 +439,15 @@ function App() {
             <div className="mail-list" aria-label={`${mailDayTitle}列表`}>
               {visibleEmailMessages.length === 0 ? (
                 <div className="empty-mail-list">
-                  {canUseEmail
-                    ? emailMessages.length === 0
-                      ? "暂无近一周 Excel 候选邮件，点击刷新邮件重试。"
-                      : `${mailDayTitle}暂无候选邮件。`
-                    : "填写邮箱和授权码后显示邮件。"}
+                  {emailMessages.length === 0
+                    ? emptyMailCopy(settings.hasAuthCode, runtimeStatus.state === "offline")
+                    : `${mailDayTitle}没有订单邮件。`}
                 </div>
               ) : (
                 visibleEmailMessages.map((message) => {
-                  const extracted = extractedMessageUids.has(message.uid);
+                  const extracted = message.extracted;
                   const pending = message.hasExcelAttachments && !extracted;
-                  const newlyArrived = pending && newMessageUids.has(message.uid);
+                  const newlyArrived = pending && mailView.newMessageUids.has(message.uid);
                   const selected = selectedMessageUids.has(message.uid);
                   const rowClass = [
                     "mail-row",
@@ -642,7 +493,7 @@ function App() {
                 <div className="section-heading">
                   <div>
                     <div className="section-title">企业微信邮箱</div>
-                    <div className="section-subtitle">只需要填写邮箱和授权码，保存后自动收起。</div>
+                    <div className="section-subtitle">邮箱授权码使用 Windows DPAPI 加密保存在本机。</div>
                   </div>
                 </div>
                 <div className="settings-grid">
@@ -652,16 +503,19 @@ function App() {
                   <Field label="授权码">
                     <Input
                       autoComplete="current-password"
-                      placeholder="邮箱客户端授权码"
+                      placeholder={settings.hasAuthCode ? "未修改时可留空" : "邮箱客户端授权码"}
                       type="password"
-                      value={authCode}
-                      onChange={(_, data) => setAuthCode(data.value)}
+                      value={authCodeInput}
+                      onChange={(_, data) => setAuthCodeInput(data.value)}
                     />
                   </Field>
                 </div>
                 <div className="row-actions">
                   <Button appearance="primary" disabled={busy || bridgeMissing} onClick={saveSettings}>
-                    保存设置
+                    保存并登录
+                  </Button>
+                  <Button disabled={busy || !canUseEmail} onClick={reconnectEmail}>
+                    重新连接
                   </Button>
                 </div>
               </Card>
@@ -751,7 +605,7 @@ function hasOutputPaths(outputs: OutputPaths): boolean {
   return Boolean(outputs.outputDir || outputs.xlsxOutput || outputs.csvOutput || outputs.auditOutput);
 }
 
-function renderMessageBadge(message: EmailMessageSummary, extracted: boolean, newlyArrived = false) {
+function renderMessageBadge(message: LocalMailMessageSummary, extracted: boolean, newlyArrived = false) {
   if (!message.hasExcelAttachments) {
     return (
       <Badge appearance="tint" color="subtle">
@@ -778,22 +632,6 @@ function renderMessageBadge(message: EmailMessageSummary, extracted: boolean, ne
       待提取
     </Badge>
   );
-}
-
-function sortMessages(messages: EmailMessageSummary[]): EmailMessageSummary[] {
-  return [...messages].sort((left, right) => timestampOf(right.date) - timestampOf(left.date));
-}
-
-function timestampOf(date: string | undefined): number {
-  if (!date) {
-    return 0;
-  }
-  const timestamp = Date.parse(date);
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-function pendingCountFrom(messages: EmailMessageSummary[], extractedUids: Set<string>): number {
-  return messages.filter((message) => message.hasExcelAttachments && !extractedUids.has(message.uid)).length;
 }
 
 function localPathsFromDrop(event: DragEvent<HTMLDivElement>): string[] {
@@ -834,46 +672,33 @@ function createPreviewApi(): OrderOrganizerApi {
     failures: [],
     outputs,
   };
+  const previewList: LocalMailListResult = {
+    days: 7,
+    scannedMessages: 2,
+    orderAttachmentCount: 1,
+    nonOrderExcelAttachmentCount: 0,
+    status: { state: "connected", detail: "预览：本地邮箱已连接" },
+    messages: [
+      {
+        uid: "preview-2",
+        subject: "今日订单附件",
+        from: "Orders <orders@example.com>",
+        date: new Date().toISOString(),
+        attachmentCount: 1,
+        excelAttachmentNames: ["today-order.xlsx"],
+        hasExcelAttachments: true,
+        extracted: false,
+      },
+    ],
+  };
 
   return {
-    loadSettings: async () => ({ email: "", authCode: "" }),
-    saveSettings: async (settings) => ({ email: settings.email.trim(), authCode: settings.authCode }),
+    loadMailSettings: async () => ({ email: "", hasAuthCode: false, startAtLogin: true }),
+    saveMailSettings: async (input) => ({ email: input.email.trim(), hasAuthCode: Boolean(input.authCode), startAtLogin: true }),
     selectLocalInputs: async () => ["/preview/orders/order.xlsx"],
-    listEmails: async () => ({
-      days: EMAIL_LIST_DAYS,
-      scannedMessages: 3,
-      orderAttachmentCount: 2,
-      nonOrderExcelAttachmentCount: 0,
-      messages: [
-        {
-          uid: "preview-3",
-          subject: "今日订单附件",
-          from: "Orders <orders@example.com>",
-          date: new Date().toISOString(),
-          attachmentCount: 1,
-          excelAttachmentNames: ["today-order.xlsx"],
-          hasExcelAttachments: true,
-        },
-        {
-          uid: "preview-2",
-          subject: "昨日订单更新",
-          from: "Factory <factory@example.com>",
-          date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-          attachmentCount: 1,
-          excelAttachmentNames: ["change.xlsm"],
-          hasExcelAttachments: true,
-        },
-        {
-          uid: "preview-1",
-          subject: "普通通知",
-          from: "Notice <notice@example.com>",
-          date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-          attachmentCount: 0,
-          excelAttachmentNames: [],
-          hasExcelAttachments: false,
-        },
-      ],
-    }),
+    listEmails: async () => previewList,
+    refreshEmails: async () => previewList,
+    reconnectEmail: async () => undefined,
     extractLocal: async () => extraction,
     extractEmail: async () => ({
       emailFetch: {
@@ -884,10 +709,7 @@ function createPreviewApi(): OrderOrganizerApi {
       },
       extraction,
     }),
-    notifyNewOrderEmails: async () => false,
-    subscribeEmailUpdates: async () => false,
-    unsubscribeEmailUpdates: async () => true,
-    onEmailUpdate: () => () => undefined,
+    onLocalMailEvent: () => () => undefined,
     checkUpdates: async () => ({
       updateAvailable: false,
       currentVersion: "preview",

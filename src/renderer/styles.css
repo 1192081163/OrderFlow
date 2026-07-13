@@ -51,6 +51,28 @@ body {
   padding: 12px 16px;
 }
 
+.mail-runtime-banner {
+  margin: -8px 0 16px;
+  padding: 10px 14px;
+  border: 1px solid #c7ddd0;
+  border-radius: 8px;
+  background: #f0faf4;
+  color: #245c3b;
+  font-size: 13px;
+}
+
+.mail-runtime-banner.offline {
+  border-color: #e6cf9a;
+  background: #fff8e7;
+  color: #76520b;
+}
+
+.mail-runtime-banner.attention {
+  border-color: #e7b7b7;
+  background: #fff1f1;
+  color: #8b2222;
+}
+
 .mail-command-layout {
   display: flex;
   align-items: center;

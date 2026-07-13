@@ -1,27 +1,27 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+import type { EmailExtractionResult } from "../core/extractionService.js";
 import type {
-  EmailListResult,
-  EmailNewMessagesEvent,
-  EmailSettings,
   ExtractionResult,
-  NewOrderEmailNotification,
+  LocalEmailExtractionRequest,
+  LocalMailEvent,
+  LocalMailListResult,
+  LocalMailSettingsView,
   ProgressEvent,
+  SaveLocalMailSettingsInput,
   UpdateCheckResult,
 } from "../shared/types.js";
-import type { EmailExtractionRequest, EmailExtractionResult, EmailListRequest } from "../core/extractionService.js";
 
 export interface OrderOrganizerApi {
-  loadSettings: () => Promise<EmailSettings>;
-  saveSettings: (settings: EmailSettings) => Promise<EmailSettings>;
+  loadMailSettings: () => Promise<LocalMailSettingsView>;
+  saveMailSettings: (input: SaveLocalMailSettingsInput) => Promise<LocalMailSettingsView>;
   selectLocalInputs: () => Promise<string[]>;
-  listEmails: (payload: EmailListRequest) => Promise<EmailListResult>;
+  listEmails: () => Promise<LocalMailListResult>;
+  refreshEmails: () => Promise<LocalMailListResult>;
+  reconnectEmail: () => Promise<void>;
   extractLocal: (payload: { paths: string[]; recursive?: boolean; inferManual?: boolean }) => Promise<ExtractionResult>;
-  extractEmail: (payload: EmailExtractionRequest) => Promise<EmailExtractionResult>;
-  notifyNewOrderEmails: (notification: NewOrderEmailNotification) => Promise<boolean>;
-  subscribeEmailUpdates: () => Promise<boolean>;
-  unsubscribeEmailUpdates: () => Promise<boolean>;
-  onEmailUpdate: (callback: (event: EmailNewMessagesEvent) => void) => () => void;
+  extractEmail: (request: LocalEmailExtractionRequest) => Promise<EmailExtractionResult>;
+  onLocalMailEvent: (callback: (event: LocalMailEvent) => void) => () => void;
   checkUpdates: () => Promise<UpdateCheckResult>;
   downloadAndOpenUpdate: (update: UpdateCheckResult) => Promise<string>;
   openPath: (targetPath: string) => Promise<void>;
@@ -29,21 +29,20 @@ export interface OrderOrganizerApi {
 }
 
 const api: OrderOrganizerApi = {
-  loadSettings: () => ipcRenderer.invoke("settings:load"),
-  saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
+  loadMailSettings: () => ipcRenderer.invoke("local-mail:settings:load"),
+  saveMailSettings: (input) => ipcRenderer.invoke("local-mail:settings:save", input),
   selectLocalInputs: () => ipcRenderer.invoke("dialog:select-local-inputs"),
-  listEmails: (payload) => ipcRenderer.invoke("emails:list", payload),
+  listEmails: () => ipcRenderer.invoke("local-mail:list"),
+  refreshEmails: () => ipcRenderer.invoke("local-mail:refresh"),
+  reconnectEmail: () => ipcRenderer.invoke("local-mail:reconnect"),
   extractLocal: (payload) => ipcRenderer.invoke("orders:extract-local", payload),
-  extractEmail: (payload) => ipcRenderer.invoke("orders:extract-email", payload),
-  notifyNewOrderEmails: (notification) => ipcRenderer.invoke("notifications:new-order-emails", notification),
-  subscribeEmailUpdates: () => ipcRenderer.invoke("emails:subscribe-updates"),
-  unsubscribeEmailUpdates: () => ipcRenderer.invoke("emails:unsubscribe-updates"),
-  onEmailUpdate: (callback) => {
-    const listener = (_event: Electron.IpcRendererEvent, update: EmailNewMessagesEvent) => {
-      callback(update);
+  extractEmail: (request) => ipcRenderer.invoke("local-mail:extract", request),
+  onLocalMailEvent: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, event: LocalMailEvent) => {
+      callback(event);
     };
-    ipcRenderer.on("emails:update", listener);
-    return () => ipcRenderer.off("emails:update", listener);
+    ipcRenderer.on("local-mail:event", listener);
+    return () => ipcRenderer.off("local-mail:event", listener);
   },
   checkUpdates: () => ipcRenderer.invoke("updates:check"),
   downloadAndOpenUpdate: (update) => ipcRenderer.invoke("updates:download-and-open", update),

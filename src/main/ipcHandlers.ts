@@ -1,16 +1,9 @@
-import { BrowserWindow, Notification, app, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 
-import { type EmailExtractionRequest, type EmailListRequest } from "../core/extractionService.js";
-import { loadEmailSettings, saveEmailSettings } from "../core/settings.js";
 import { checkForUpdates, downloadUpdateExecutable } from "../core/updateChecker.js";
-import type { EmailSettings, NewOrderEmailNotification, ProgressEvent, UpdateCheckResult } from "../shared/types.js";
-import {
-  extractDesktopEmailOrders,
-  extractDesktopLocalOrders,
-  listDesktopEmails,
-  subscribeDesktopEmailUpdates,
-  type DesktopEmailSubscription,
-} from "./emailActions.js";
+import type { LocalEmailExtractionRequest, ProgressEvent, SaveLocalMailSettingsInput, UpdateCheckResult } from "../shared/types.js";
+import type { LocalMailService } from "../localMail/localMailService.js";
+import { extractDesktopLocalOrders } from "./emailActions.js";
 
 interface LocalExtractionPayload {
   paths?: string[];
@@ -18,15 +11,19 @@ interface LocalExtractionPayload {
   inferManual?: boolean;
 }
 
-const emailUpdateSubscriptions = new Map<number, DesktopEmailSubscription>();
-
-export function registerIpcHandlers(): void {
-  ipcMain.handle("settings:load", async () => loadEmailSettings());
-
-  ipcMain.handle("settings:save", async (_event, settings: EmailSettings) => {
-    await saveEmailSettings(settings);
-    return loadEmailSettings();
-  });
+export function registerIpcHandlers(dependencies: {
+  localMail: Pick<LocalMailService, "loadSettings" | "saveSettings" | "listEmails" | "refreshEmails" | "reconnect" | "extractEmail">;
+}): void {
+  ipcMain.handle("local-mail:settings:load", () => dependencies.localMail.loadSettings());
+  ipcMain.handle("local-mail:settings:save", (_event, input: SaveLocalMailSettingsInput) =>
+    dependencies.localMail.saveSettings(input),
+  );
+  ipcMain.handle("local-mail:list", () => dependencies.localMail.listEmails());
+  ipcMain.handle("local-mail:refresh", () => dependencies.localMail.refreshEmails());
+  ipcMain.handle("local-mail:reconnect", () => dependencies.localMail.reconnect());
+  ipcMain.handle("local-mail:extract", (event, request: LocalEmailExtractionRequest) =>
+    dependencies.localMail.extractEmail(request, sendProgress(event.sender)),
+  );
 
   ipcMain.handle("updates:check", async () => checkForUpdates());
 
@@ -55,32 +52,6 @@ export function registerIpcHandlers(): void {
     return result.canceled ? [] : result.filePaths;
   });
 
-  ipcMain.handle("emails:list", async (_event, payload: EmailListRequest) => listDesktopEmails(payload));
-
-  ipcMain.handle("emails:subscribe-updates", async (event): Promise<boolean> => {
-    closeEmailUpdateSubscription(event.sender.id);
-    const subscription = await subscribeDesktopEmailUpdates((update) => {
-      if (!event.sender.isDestroyed()) {
-        event.sender.send("emails:update", update);
-      }
-    });
-    if (!subscription) {
-      return false;
-    }
-    emailUpdateSubscriptions.set(event.sender.id, subscription);
-    event.sender.once("destroyed", () => closeEmailUpdateSubscription(event.sender.id));
-    return true;
-  });
-
-  ipcMain.handle("emails:unsubscribe-updates", async (event): Promise<boolean> => {
-    closeEmailUpdateSubscription(event.sender.id);
-    return true;
-  });
-
-  ipcMain.handle("notifications:new-order-emails", async (event, notification: NewOrderEmailNotification) =>
-    showNewOrderEmailNotification(event.sender, notification),
-  );
-
   ipcMain.handle("orders:extract-local", async (event, payload: LocalExtractionPayload) =>
     extractDesktopLocalOrders(
       {
@@ -90,10 +61,6 @@ export function registerIpcHandlers(): void {
       },
       sendProgress(event.sender),
     ),
-  );
-
-  ipcMain.handle("orders:extract-email", async (event, payload: EmailExtractionRequest) =>
-    extractDesktopEmailOrders(payload, sendProgress(event.sender)),
   );
 
   ipcMain.handle("shell:open-path", async (_event, targetPath: string) => {
@@ -107,44 +74,8 @@ export function registerIpcHandlers(): void {
   });
 }
 
-function closeEmailUpdateSubscription(webContentsId: number): void {
-  const existing = emailUpdateSubscriptions.get(webContentsId);
-  if (!existing) {
-    return;
-  }
-  existing.close();
-  emailUpdateSubscriptions.delete(webContentsId);
-}
-
 function sendProgress(sender: Electron.WebContents): (event: ProgressEvent) => void {
   return (event) => {
     sender.send("orders:progress", event);
   };
-}
-
-function showNewOrderEmailNotification(sender: Electron.WebContents, notification: NewOrderEmailNotification): boolean {
-  if (!Notification.isSupported()) {
-    return false;
-  }
-
-  const window = BrowserWindow.fromWebContents(sender);
-  const nativeNotification = new Notification({
-    title: notification.title.trim() || "发现新订单邮件",
-    body: notification.body.trim() || "有新的订单邮件待提取。",
-    silent: false,
-  });
-
-  nativeNotification.on("click", () => {
-    if (!window) {
-      return;
-    }
-    if (window.isMinimized()) {
-      window.restore();
-    }
-    window.show();
-    window.focus();
-  });
-  nativeNotification.show();
-  window?.flashFrame(true);
-  return true;
 }

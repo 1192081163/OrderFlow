@@ -26,25 +26,34 @@ describe("Electron preload bridge", () => {
     expect(appSource).toContain("桌面接口加载失败");
   });
 
-  test("exposes native new-order-email notifications through preload and IPC", async () => {
+  test("exposes only secret-free local-mail IPC", async () => {
     const [preloadSource, ipcSource] = await Promise.all([
       readFile(path.join(root, "src/preload/preload.cts"), "utf8"),
       readFile(path.join(root, "src/main/ipcHandlers.ts"), "utf8"),
     ]);
 
-    expect(preloadSource).toContain("notifyNewOrderEmails");
-    expect(preloadSource).toContain("notifications:new-order-emails");
-    expect(preloadSource).toContain("subscribeEmailUpdates");
-    expect(preloadSource).toContain("emails:subscribe-updates");
-    expect(preloadSource).toContain("emails:update");
-    expect(ipcSource).toContain("emails:subscribe-updates");
-    expect(ipcSource).toContain("emails:unsubscribe-updates");
-    expect(ipcSource).toContain("emails:update");
-    expect(preloadSource).toContain("downloadAndOpenUpdate");
-expect(preloadSource).toContain("updates:download-and-open");
-expect(ipcSource).toContain("notifications:new-order-emails");
-expect(ipcSource).toContain("updates:download-and-open");
-expect(ipcSource).toContain("downloadUpdateExecutable");
-expect(ipcSource).toContain("app.quit");
-});
+    for (const channel of [
+      "local-mail:settings:load",
+      "local-mail:settings:save",
+      "local-mail:list",
+      "local-mail:refresh",
+      "local-mail:reconnect",
+      "local-mail:extract",
+      "local-mail:event",
+    ]) expect(`${preloadSource}\n${ipcSource}`).toContain(channel);
+    expect(preloadSource).not.toContain("notifyNewOrderEmails");
+    expect(preloadSource).not.toContain("subscribeEmailUpdates");
+    expect(preloadSource).not.toContain("authCode: settings.authCode");
+    expect(ipcSource).not.toContain("loadEmailSettings");
+    expect(ipcSource).not.toContain("saveEmailSettings");
+  });
+
+  test("starts local mail after app readiness and closes windows to tray", async () => {
+    const mainSource = await readFile(path.join(root, "src/main/main.ts"), "utf8");
+    expect(mainSource.indexOf("app.whenReady()")).toBeLessThan(mainSource.indexOf("await createMainLocalMailServices()"));
+    expect(mainSource).toContain('process.argv.includes("--hidden")');
+    expect(mainSource).toContain('window.on("close"');
+    expect(mainSource).toContain("createTrayController");
+    expect(mainSource).not.toContain('app.on("window-all-closed"');
+  });
 });

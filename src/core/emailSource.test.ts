@@ -4,7 +4,6 @@ import path from "node:path";
 import ExcelJS from "exceljs";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { loadEmailSettings, saveEmailSettings } from "./settings.js";
 import {
   collectOrderEmailAttachments,
   fetchEmailOrderFiles,
@@ -123,15 +122,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(tempRoot, { recursive: true, force: true });
-});
-
-describe("email settings", () => {
-  test("round trips settings", async () => {
-    const settingsPath = path.join(tempRoot, "settings.json");
-    await saveEmailSettings({ email: "user@example.com", authCode: "secret" }, settingsPath);
-
-    expect(await loadEmailSettings(settingsPath)).toEqual({ email: "user@example.com", authCode: "secret" });
-  });
 });
 
 describe("email attachments", () => {
