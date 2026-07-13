@@ -33,7 +33,7 @@ def result_to_json(result: desktop_runner.ExtractionResult) -> dict[str, Any]:
     }
 
 
-def progress_to_jsonl(index: int, total: int, path: Path, status: str) -> None:
+def progress_to_jsonl(index: int, total: int, path: Path, status: str, phase: str) -> None:
     print(
         json.dumps(
             {
@@ -42,6 +42,7 @@ def progress_to_jsonl(index: int, total: int, path: Path, status: str) -> None:
                 "total": total,
                 "filename": path.name,
                 "status": status,
+                "phase": phase,
             },
             ensure_ascii=False,
         ),

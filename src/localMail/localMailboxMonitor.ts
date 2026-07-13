@@ -56,6 +56,7 @@ export class LocalMailboxMonitor {
     this.controller?.abort();
     await this.idle?.close();
     this.idle = undefined;
+    await this.scanInFlight?.catch(() => undefined);
     this.setStatus({ state: "stopped", detail: "邮箱监听已停止" });
   }
 

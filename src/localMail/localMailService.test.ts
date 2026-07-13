@@ -73,6 +73,10 @@ describe("local mail service", () => {
       undefined,
     );
     expect(fixture.store.markExtracted).toHaveBeenCalledWith("orders@example.com", ["101"]);
+    expect(fixture.monitor.stop).toHaveBeenCalledOnce();
+    expect(fixture.monitor.start).toHaveBeenCalledOnce();
+    expect(fixture.monitor.stop.mock.invocationCallOrder[0]).toBeLessThan(fixture.extract.mock.invocationCallOrder[0]!);
+    expect(fixture.extract.mock.invocationCallOrder[0]).toBeLessThan(fixture.monitor.start.mock.invocationCallOrder[0]!);
   });
 
   test("does not mark selected UIDs when extraction reports any failure", async () => {
@@ -80,6 +84,17 @@ describe("local mail service", () => {
     fixture.extract.mockResolvedValueOnce(emailExtractionResult([{ path: "order.xlsx", error: "invalid workbook" }]));
     await fixture.service.extractEmail({ messageUids: ["101"] });
     expect(fixture.store.markExtracted).not.toHaveBeenCalled();
+    expect(fixture.monitor.start).toHaveBeenCalledOnce();
+  });
+
+  test("restarts mailbox monitoring when attachment extraction throws", async () => {
+    const fixture = createFixture();
+    fixture.extract.mockRejectedValueOnce(new Error("TLS failed"));
+
+    await expect(fixture.service.extractEmail({ messageUids: ["101"] })).rejects.toThrow("TLS failed");
+
+    expect(fixture.monitor.stop).toHaveBeenCalledOnce();
+    expect(fixture.monitor.start).toHaveBeenCalledOnce();
   });
 });
 

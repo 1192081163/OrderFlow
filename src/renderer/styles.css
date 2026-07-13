@@ -415,8 +415,16 @@ body {
   margin: 12px 0 10px;
 }
 
-.progress-bar[data-empty="true"] > div {
-  opacity: 0;
+.progress-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 22px;
+  margin-bottom: 6px;
+  color: #424242;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .log {

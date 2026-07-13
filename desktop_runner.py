@@ -44,7 +44,7 @@ class NoInputFilesError(ValueError):
     pass
 
 
-ProgressCallback = Callable[[int, int, Path, str], None]
+ProgressCallback = Callable[[int, int, Path, str, str], None]
 
 
 def is_valid_order_file(path: Path) -> bool:
@@ -128,7 +128,7 @@ def run_extraction(
 
     for index, path in enumerate(resolution.input_files, start=1):
         if progress:
-            progress(index, total, path, "running")
+            progress(index, total, path, "running", "extracting")
         try:
             row = extract.extract_workbook(path, infer_manual=infer_manual)
             if extract.is_order_row(row):
@@ -138,15 +138,25 @@ def run_extraction(
         except Exception as exc:
             failures.append(ExtractionFailure(path=path, error=str(exc)))
             if progress:
-                progress(index, total, path, "failed")
+                progress(index, total, path, "failed", "extracting")
         else:
             if progress:
-                progress(index, total, path, "completed")
+                progress(index, total, path, "completed", "extracting")
 
     rows = extract.dedupe_latest_rows(rows, resolution.input_files)
     rows = extract.sort_rows_by_ideal_delivery_date(rows)
     remove_sidecar_outputs(outputs)
-    extract.write_xlsx(rows, outputs.xlsx_output, resolution.base_dir, resolution.input_files)
+    if progress:
+        progress(1, 1, outputs.xlsx_output, "running", "writing")
+    try:
+        extract.write_xlsx(rows, outputs.xlsx_output, resolution.base_dir, resolution.input_files)
+    except Exception:
+        if progress:
+            progress(1, 1, outputs.xlsx_output, "failed", "writing")
+        raise
+    else:
+        if progress:
+            progress(1, 1, outputs.xlsx_output, "completed", "writing")
     return ExtractionResult(
         input_files=resolution.input_files,
         rows=rows,

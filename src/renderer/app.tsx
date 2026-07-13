@@ -11,7 +11,16 @@ import {
   ProgressBar,
   webLightTheme,
 } from "@fluentui/react-components";
-import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type Dispatch,
+  type DragEvent,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
 
 import type { EmailExtractionResult } from "../core/extractionService.js";
@@ -61,6 +70,7 @@ function App() {
   const [mailDayOffset, setMailDayOffset] = useState(0);
   const [selectedMessageUids, setSelectedMessageUids] = useState<Set<string>>(() => new Set());
   const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState("等待开始");
   const [latestOutputs, setLatestOutputs] = useState<OutputPaths | null>(null);
   const [resultFailures, setResultFailures] = useState<ExtractionFailure[]>([]);
   const [logLines, setLogLines] = useState<string[]>([]);
@@ -127,7 +137,7 @@ function App() {
   }, [appendLog, applyList, canUseEmail]);
 
   useEffect(() => {
-    const removeProgress = api.onProgress((event) => renderProgress(event, appendLog, setProgress));
+    const removeProgress = api.onProgress((event) => renderProgress(event, appendLog, setProgress, setProgressLabel));
     const removeMailEvent = api.onLocalMailEvent((event) => {
       setMailView((current) => applyLocalMailEvent(current, event));
     });
@@ -152,10 +162,11 @@ function App() {
     }
   }, [logLines]);
 
-  async function runUiTask(task: () => Promise<void>): Promise<void> {
+  async function runUiTask(task: () => Promise<void>, failureProgressLabel?: string): Promise<void> {
     if (bridgeMissing) {
       appendLog(`失败：${BRIDGE_MISSING_MESSAGE}`);
       setSummary(BRIDGE_MISSING_MESSAGE);
+      if (failureProgressLabel) setProgressLabel(failureProgressLabel);
       return;
     }
 
@@ -167,6 +178,7 @@ function App() {
       appendLog(`失败：${messageText}`);
       setResultFailures([{ path: "订单提取", error: messageText }]);
       setSummary(messageText);
+      if (failureProgressLabel) setProgressLabel(failureProgressLabel);
     } finally {
       setBusy(false);
     }
@@ -174,7 +186,8 @@ function App() {
 
   function resetResult(): void {
     setLatestOutputs(null);
-    setProgress(0);
+    setProgress(2);
+    setProgressLabel("正在准备");
     setSummary("正在提取订单");
     setResultFailures([]);
     setLogLines([]);
@@ -183,6 +196,7 @@ function App() {
   function renderExtractionResult(result: ExtractionResult): void {
     setLatestOutputs(hasOutputPaths(result.outputs) ? result.outputs : null);
     setProgress(100);
+    setProgressLabel("提取完成");
     setResultFailures(result.failures);
     setSummary(`成功 ${result.rows.length} 个订单，失败 ${result.failures.length} 个，跳过 ${result.skippedFiles.length} 个文件`);
     if (result.outputs.outputDir) {
@@ -192,7 +206,7 @@ function App() {
   }
 
   function renderEmailResult(result: EmailExtractionResult): void {
-    appendLog(`已扫描 ${result.emailFetch.scannedMessages} 封邮件，下载 ${result.emailFetch.attachmentCount} 个订单附件`);
+    appendLog(`已扫描 ${result.emailFetch.scannedMessages} 封邮件，下载 ${result.emailFetch.attachmentCount} 个 Excel 附件`);
     renderExtractionResult(result.extraction);
   }
 
@@ -246,7 +260,7 @@ function App() {
         messageUids.forEach((uid) => nextNew.delete(uid));
         return { ...current, newMessageUids: nextNew };
       });
-    });
+    }, "提取失败");
   }
 
   async function extractLocal(paths: string[]): Promise<void> {
@@ -259,7 +273,7 @@ function App() {
         inferManual: true,
       });
       renderExtractionResult(result);
-    });
+    }, "提取失败");
   }
 
   async function selectLocalInputs(): Promise<void> {
@@ -499,7 +513,7 @@ function App() {
                 <div className="section-heading">
                   <div>
                     <div className="section-title">企业微信邮箱</div>
-                    <div className="section-subtitle">邮箱授权码使用 Windows DPAPI 加密保存在本机。</div>
+                    <div className="section-subtitle">账号和授权码会自动记住；授权码使用 Windows DPAPI 加密保存在本机。</div>
                   </div>
                 </div>
                 <div className="settings-grid">
@@ -583,7 +597,11 @@ function App() {
                 )}
               </div>
               <div className="progress-area">
-                <ProgressBar className="progress-bar" value={progress} max={100} data-empty={progress === 0} />
+                <div className="progress-copy" aria-live="polite">
+                  <span>{progressLabel}</span>
+                  <span>{progress}%</span>
+                </div>
+                <ProgressBar className="progress-bar" value={progress} max={100} aria-label={progressLabel} />
               </div>
               <pre ref={logRef} id="logOutput" className="log">
                 {logLines.length > 0 ? `${logLines.join("\n")}\n` : ""}
@@ -599,12 +617,30 @@ function App() {
 function renderProgress(
   event: ProgressEvent,
   appendLog: (line: string) => void,
-  setProgress: (value: number) => void,
+  setProgress: Dispatch<SetStateAction<number>>,
+  setProgressLabel: Dispatch<SetStateAction<string>>,
 ): void {
-  const percent = event.total === 0 ? 0 : Math.round((event.index / event.total) * 100);
-  setProgress(percent);
-  const label = event.status === "running" ? "正在提取" : event.status === "completed" ? "完成" : "失败";
+  const completed = event.status === "running" ? Math.max(0, event.index - 1) : Math.min(event.total, event.index);
+  const percent = Math.min(
+    100,
+    Math.max(0, event.percent ?? (event.total === 0 ? 0 : Math.round((completed / event.total) * 100))),
+  );
+  setProgress((current) => Math.max(current, percent));
+  const phase = event.phase ?? "extracting";
+  const label = progressStatusLabel(phase, event.status);
+  setProgressLabel(`${label}：${event.filename}`);
   appendLog(`[${event.index}/${event.total}] ${label} ${event.filename}`);
+}
+
+function progressStatusLabel(phase: NonNullable<ProgressEvent["phase"]>, status: ProgressEvent["status"]): string {
+  const labels = {
+    preparing: ["正在准备", "准备完成", "准备失败"],
+    downloading: ["正在下载", "下载完成", "下载失败"],
+    extracting: ["正在提取", "提取完成", "提取失败"],
+    writing: ["正在写入结果", "结果写入完成", "结果写入失败"],
+  } as const;
+  const statusIndex = status === "running" ? 0 : status === "completed" ? 1 : 2;
+  return labels[phase][statusIndex];
 }
 
 function hasOutputPaths(outputs: OutputPaths): boolean {

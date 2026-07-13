@@ -10,7 +10,7 @@ import {
 } from "imapflow";
 
 import { isOrderWorkbookContent } from "./orderFileClassifier.js";
-import type { EmailListResult, EmailMessageSummary, ImapConfig } from "../shared/types.js";
+import type { EmailListResult, EmailMessageSummary, ImapConfig, ProgressEvent } from "../shared/types.js";
 
 export const DEFAULT_IMAP_SERVER = "imap.exmail.qq.com";
 export const DEFAULT_IMAP_PORT = 993;
@@ -39,6 +39,7 @@ export interface EmailFetchResult {
 export interface EmailFetchOptions {
   hours?: number;
   messageUids?: string[];
+  progress?: (event: ProgressEvent) => void;
 }
 
 export interface EmailListOptions {
@@ -184,7 +185,7 @@ export async function listRecentOrderEmailMessages(
   config: ImapConfig,
   options: OrderEmailListOptions = {},
 ): Promise<EmailListResult> {
-  return retryTransientImapConnection(() => listRecentOrderEmailMessagesOnce(config, options));
+  return retryTransientImapConnection(() => listRecentOrderEmailMessagesOnce(config, options), config);
 }
 
 async function listRecentOrderEmailMessagesOnce(
@@ -340,7 +341,7 @@ export function isMessageWithinFetchWindow(messageDate: Date | undefined, cutoff
 }
 
 async function fetchExcelAttachments(config: ImapConfig, options: EmailFetchOptions): Promise<EmailAttachmentBatch> {
-  return retryTransientImapConnection(() => fetchExcelAttachmentsOnce(config, options));
+  return retryTransientImapConnection(() => fetchExcelAttachmentsOnce(config, options), config);
 }
 
 async function fetchExcelAttachmentsOnce(config: ImapConfig, options: EmailFetchOptions): Promise<EmailAttachmentBatch> {
@@ -386,21 +387,50 @@ async function fetchExcelAttachmentsOnce(config: ImapConfig, options: EmailFetch
         });
       }
 
+      const totalAttachments = candidates.reduce((sum, candidate) => sum + candidate.parts.length, 0);
+      let attachmentIndex = 0;
       for (const candidate of candidates) {
+        const firstPart = candidate.parts[0];
+        if (firstPart) {
+          options.progress?.({
+            index: attachmentIndex + 1,
+            total: totalAttachments,
+            filename: firstPart.filename,
+            status: "running",
+            phase: "downloading",
+          });
+        }
         const downloaded = await client.downloadMany(
           candidate.uid,
           candidate.parts.map((part) => part.part),
           { uid: true },
         );
-        for (const part of candidate.parts) {
+        for (const [partIndex, part] of candidate.parts.entries()) {
+          attachmentIndex += 1;
+          if (partIndex > 0) {
+            options.progress?.({
+              index: attachmentIndex,
+              total: totalAttachments,
+              filename: part.filename,
+              status: "running",
+              phase: "downloading",
+            });
+          }
           const downloadedPart = downloaded[part.part];
           if (!downloadedPart?.content) {
+            options.progress?.({
+              index: attachmentIndex,
+              total: totalAttachments,
+              filename: part.filename,
+              status: "failed",
+              phase: "downloading",
+            });
             continue;
           }
 
           const filename = downloadedPart.meta?.filename || part.filename;
           const content = toBuffer(downloadedPart.content);
-          if (await isOrderEmailAttachment({ filename, content })) {
+          if (content.byteLength <= MAX_ORDER_ATTACHMENT_BYTES) {
             attachments.push({
               filename,
               content,
@@ -409,6 +439,13 @@ async function fetchExcelAttachmentsOnce(config: ImapConfig, options: EmailFetch
               messageUid: candidate.uid,
             });
           }
+          options.progress?.({
+            index: attachmentIndex,
+            total: totalAttachments,
+            filename,
+            status: "completed",
+            phase: "downloading",
+          });
         }
       }
     } finally {
@@ -421,18 +458,34 @@ async function fetchExcelAttachmentsOnce(config: ImapConfig, options: EmailFetch
   return { attachments, scannedMessages };
 }
 
-async function retryTransientImapConnection<T>(operation: () => Promise<T>): Promise<T> {
+async function retryTransientImapConnection<T>(operation: () => Promise<T>, config: ImapConfig): Promise<T> {
   for (let attempt = 1; attempt <= TRANSIENT_IMAP_ATTEMPTS; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
-      if (attempt === TRANSIENT_IMAP_ATTEMPTS || !isTransientImapConnectionError(error)) {
+      if (!isTransientImapConnectionError(error)) {
         throw error;
       }
+      if (attempt === TRANSIENT_IMAP_ATTEMPTS) {
+        throw imapNetworkError(config, error);
+      }
+      await waitForImapRetry(attempt * 1_000);
     }
   }
 
   throw new Error("IMAP retry loop exhausted unexpectedly.");
+}
+
+function imapNetworkError(config: ImapConfig, cause: unknown): Error {
+  const error = new Error(
+    `企业邮箱网络连接失败：无法建立到 ${config.server}:${config.port} 的 TLS 连接。请确认当前电脑或办公室网络允许出站 TCP ${config.port}，然后点击“重新连接”再试。`,
+  );
+  Object.defineProperty(error, "cause", { value: cause, configurable: true });
+  return error;
+}
+
+function waitForImapRetry(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function isTransientImapConnectionError(error: unknown): boolean {

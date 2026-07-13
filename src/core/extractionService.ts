@@ -65,11 +65,12 @@ export async function extractLocalOrders(
     throw new Error("请选择订单 Excel 文件或文件夹。");
   }
 
+  emitPreparing(progress);
   const extractor = dependencies.runOrderExtraction ?? runPythonOrderExtraction;
   return extractor(paths, {
     recursive: request.recursive ?? false,
     inferManual: request.inferManual ?? true,
-    progress,
+    progress: mapExtractionProgress(progress, 5),
   });
 }
 
@@ -82,14 +83,16 @@ export async function extractEmailOrders(
   const fetcher = dependencies.fetchEmailOrderFiles ?? fetchEmailOrderFiles;
   const extractor = dependencies.runOrderExtraction ?? runPythonOrderExtraction;
   const downloadDir = request.downloadDir ?? timestampedDownloadDir(dependencies.now?.() ?? new Date());
+  emitPreparing(progress);
   const emailFetch = await fetcher(config, downloadDir, {
     hours: request.hours,
     messageUids: request.messageUids,
+    progress: mapProgressRange(progress, 5, 35),
   });
   const extraction = await extractor(emailFetch.files, {
     recursive: false,
     inferManual: request.inferManual ?? true,
-    progress,
+    progress: mapExtractionProgress(progress, 35),
   });
 
   return { emailFetch, extraction };
@@ -132,4 +135,53 @@ export function timestampedDownloadDir(now: Date): string {
     String(now.getSeconds()).padStart(2, "0"),
   ].join("");
   return path.join(defaultEmailDownloadRoot(), stamp);
+}
+
+function emitPreparing(progress?: (event: ProgressEvent) => void): void {
+  progress?.({
+    index: 0,
+    total: 1,
+    filename: "准备提取",
+    status: "running",
+    phase: "preparing",
+    percent: 2,
+  });
+}
+
+function mapExtractionProgress(
+  progress: ((event: ProgressEvent) => void) | undefined,
+  extractingStart: number,
+): ((event: ProgressEvent) => void) | undefined {
+  if (!progress) return undefined;
+  return (event) => {
+    const [start, end] = event.phase === "writing" ? [96, 99] : [extractingStart, 95];
+    progress(mapProgressEvent(event, start, end));
+  };
+}
+
+function mapProgressRange(
+  progress: ((event: ProgressEvent) => void) | undefined,
+  start: number,
+  end: number,
+): ((event: ProgressEvent) => void) | undefined {
+  if (!progress) return undefined;
+  return (event) => progress(mapProgressEvent(event, start, end));
+}
+
+function mapProgressEvent(event: ProgressEvent, start: number, end: number): ProgressEvent {
+  const total = Math.max(0, event.total);
+  const completed =
+    event.status === "running"
+      ? Math.max(0, event.index - 1)
+      : Math.min(total, Math.max(0, event.index));
+  const ratio =
+    typeof event.percent === "number" && Number.isFinite(event.percent)
+      ? Math.min(100, Math.max(0, event.percent)) / 100
+      : total > 0
+        ? completed / total
+        : 0;
+  return {
+    ...event,
+    percent: Math.round(start + (end - start) * ratio),
+  };
 }

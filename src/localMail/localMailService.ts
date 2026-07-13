@@ -127,22 +127,27 @@ export class LocalMailService {
       throw new Error("请先勾选要提取的邮件。");
     }
     const credentials = await this.dependencies.credentials.loadCredentials();
-    const result = await this.extract(
-      {
-        ...credentials,
-        server: "imap.exmail.qq.com",
-        port: 993,
-        hours: 168,
-        messageUids,
-        inferManual: request.inferManual ?? true,
-      },
-      progress,
-    );
-    if (result.extraction.failures.length === 0) {
-      this.dependencies.store.markExtracted(credentials.email, messageUids);
-      await this.emitList([]);
+    await this.dependencies.monitor.stop();
+    try {
+      const result = await this.extract(
+        {
+          ...credentials,
+          server: "imap.exmail.qq.com",
+          port: 993,
+          hours: 168,
+          messageUids,
+          inferManual: request.inferManual ?? true,
+        },
+        progress,
+      );
+      if (result.extraction.failures.length === 0) {
+        this.dependencies.store.markExtracted(credentials.email, messageUids);
+        await this.emitList([]);
+      }
+      return result;
+    } finally {
+      await this.dependencies.monitor.start();
     }
-    return result;
   }
 
   private async handleMonitorEvent(event: LocalMailboxMonitorEvent): Promise<void> {

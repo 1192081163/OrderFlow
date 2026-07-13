@@ -25,6 +25,18 @@ describe("local mail credential store", () => {
     expect(JSON.parse(raw)).toMatchObject({ email: "orders@example.com", encryptedAuthCode: expect.any(String) });
   });
 
+  test("loads the remembered account and authorization code after an application restart", async () => {
+    const settingsPath = await tempSettingsPath();
+    const storage = fakeSafeStorage();
+    const firstRun = new LocalMailCredentialStore({ settingsPath, safeStorage: storage });
+    await firstRun.save({ email: "orders@example.com", authCode: "mail-secret", startAtLogin: true });
+
+    const restartedApp = new LocalMailCredentialStore({ settingsPath, safeStorage: storage });
+
+    expect(await restartedApp.loadView()).toEqual({ email: "orders@example.com", hasAuthCode: true, startAtLogin: true });
+    expect(await restartedApp.loadCredentials()).toEqual({ email: "orders@example.com", authCode: "mail-secret" });
+  });
+
   test("migrates a legacy plaintext authorization code once", async () => {
     const settingsPath = await tempSettingsPath();
     await writeFile(settingsPath, JSON.stringify({ email: "orders@example.com", authCode: "legacy-secret" }), "utf8");

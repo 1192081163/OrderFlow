@@ -21,7 +21,7 @@ import {
   verifyImapConnection,
   type EmailAttachment,
 } from "./emailSource.js";
-import type { ImapConfig } from "../shared/types.js";
+import type { ImapConfig, ProgressEvent } from "../shared/types.js";
 
 const imapMock = vi.hoisted(() => ({
   messages: [] as unknown[],
@@ -121,6 +121,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   await rm(tempRoot, { recursive: true, force: true });
 });
 
@@ -328,7 +329,7 @@ describe("email IMAP scanning", () => {
     expect(imapMock.instances[0]?.downloadManyCalls).toEqual([]);
   });
 
-  test("downloads selected Excel attachment parts before filtering order workbooks", async () => {
+  test("downloads selected Excel attachments once and reports download progress", async () => {
     imapMock.downloadManyWhileFetching = true;
     imapMock.messages = [
       makeMetadataMessage({
@@ -345,12 +346,21 @@ describe("email IMAP scanning", () => {
       },
     };
 
-    const result = await fetchEmailOrderFiles(testImapConfig(), tempRoot, { messageUids: ["601"] });
+    const progressEvents: ProgressEvent[] = [];
+    const result = await fetchEmailOrderFiles(testImapConfig(), tempRoot, {
+      messageUids: ["601"],
+      progress: (event) => progressEvents.push(event),
+    });
 
     expect(result.scannedMessages).toBe(1);
-    expect(result.attachmentCount).toBe(1);
-    expect(result.files).toHaveLength(1);
-    expect(path.basename(result.files[0] ?? "")).toBe("order.xlsx");
+    expect(result.attachmentCount).toBe(2);
+    expect(result.files.map((file) => path.basename(file))).toEqual(["order.xlsx", "weekly-report.xlsx"]);
+    expect(progressEvents).toEqual([
+      { index: 1, total: 2, filename: "order.xlsx", status: "running", phase: "downloading" },
+      { index: 1, total: 2, filename: "order.xlsx", status: "completed", phase: "downloading" },
+      { index: 2, total: 2, filename: "weekly-report.xlsx", status: "running", phase: "downloading" },
+      { index: 2, total: 2, filename: "weekly-report.xlsx", status: "completed", phase: "downloading" },
+    ]);
     expect(imapMock.instances[0]?.fetchCalls).toEqual([
       {
         range: "601",
@@ -379,12 +389,33 @@ describe("email IMAP scanning", () => {
       },
     };
 
-    const result = await fetchEmailOrderFiles(testImapConfig(), tempRoot, { messageUids: ["701"] });
+    vi.useFakeTimers();
+    const resultPromise = fetchEmailOrderFiles(testImapConfig(), tempRoot, { messageUids: ["701"] });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
 
     expect(result.attachmentCount).toBe(1);
     expect(imapMock.instances).toHaveLength(2);
     expect(imapMock.instances[0]?.fetchCalls).toEqual([]);
     expect(imapMock.instances[1]?.fetchCalls).toHaveLength(1);
+  });
+
+  test("reports an actionable network error after TLS retries are exhausted", async () => {
+    imapMock.connectFailures = [
+      new Error("Client network socket disconnected before secure TLS connection was established"),
+      new Error("Client network socket disconnected before secure TLS connection was established"),
+      new Error("Client network socket disconnected before secure TLS connection was established"),
+    ];
+    vi.useFakeTimers();
+
+    const resultPromise = fetchEmailOrderFiles(testImapConfig(), tempRoot, { messageUids: ["801"] });
+    const rejection = expect(resultPromise).rejects.toThrow(
+      "无法建立到 imap.example.com:993 的 TLS 连接",
+    );
+    await vi.runAllTimersAsync();
+
+    await rejection;
+    expect(imapMock.instances).toHaveLength(3);
   });
 
   test("downloads only unseen candidate UIDs and returns only valid order workbooks", async () => {

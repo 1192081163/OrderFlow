@@ -130,6 +130,26 @@ def test_run_extraction_writes_only_result_workbook(tmp_path: Path) -> None:
     assert not result.outputs.audit_output.exists()
 
 
+def test_run_extraction_reports_extracting_and_writing_progress(tmp_path: Path) -> None:
+    order = tmp_path / "29698 order.xlsx"
+    make_order_workbook(order, "29698")
+    events: list[tuple[int, int, str, str, str]] = []
+
+    run_extraction(
+        [order],
+        progress=lambda index, total, current, status, phase: events.append(
+            (index, total, current.name, status, phase)
+        ),
+    )
+
+    assert events == [
+        (1, 1, order.name, "running", "extracting"),
+        (1, 1, order.name, "completed", "extracting"),
+        (1, 1, "订单整理结果.xlsx", "running", "writing"),
+        (1, 1, "订单整理结果.xlsx", "completed", "writing"),
+    ]
+
+
 def test_run_extraction_sorts_rows_by_ideal_delivery_date(tmp_path: Path) -> None:
     later = tmp_path / "100 late.xlsx"
     blank = tmp_path / "200 blank.xlsx"

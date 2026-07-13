@@ -1,10 +1,14 @@
 export type ProgressStatus = "running" | "completed" | "failed";
 
+export type ProgressPhase = "preparing" | "downloading" | "extracting" | "writing";
+
 export interface ProgressEvent {
   index: number;
   total: number;
   filename: string;
   status: ProgressStatus;
+  phase?: ProgressPhase;
+  percent?: number;
 }
 
 export interface OutputPaths {

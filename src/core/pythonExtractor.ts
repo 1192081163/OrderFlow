@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ExtractionResult, ProgressEvent, ProgressStatus } from "../shared/types.js";
+import type { ExtractionResult, ProgressEvent, ProgressPhase, ProgressStatus } from "../shared/types.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -137,13 +137,17 @@ function toProgressEvent(payload: unknown): ProgressEvent | null {
   const total = item.total;
   const filename = item.filename;
   const status = item.status;
+  const phase = item.phase;
+  const percent = item.percent;
   if (
     typeof index !== "number" ||
     typeof total !== "number" ||
     !Number.isInteger(index) ||
     !Number.isInteger(total) ||
     typeof filename !== "string" ||
-    !isProgressStatus(status)
+    !isProgressStatus(status) ||
+    (phase !== undefined && !isProgressPhase(phase)) ||
+    (percent !== undefined && (typeof percent !== "number" || !Number.isFinite(percent)))
   ) {
     return null;
   }
@@ -152,11 +156,17 @@ function toProgressEvent(payload: unknown): ProgressEvent | null {
     total,
     filename,
     status,
+    ...(phase === undefined ? {} : { phase }),
+    ...(percent === undefined ? {} : { percent }),
   };
 }
 
 function isProgressStatus(value: unknown): value is ProgressStatus {
   return value === "running" || value === "completed" || value === "failed";
+}
+
+function isProgressPhase(value: unknown): value is ProgressPhase {
+  return value === "preparing" || value === "downloading" || value === "extracting" || value === "writing";
 }
 
 function resolvePythonCommand(): PythonCommand {

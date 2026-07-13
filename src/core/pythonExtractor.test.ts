@@ -5,6 +5,7 @@ import ExcelJS from "exceljs";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { resolvePythonExecutionCwd, runPythonOrderExtraction } from "./pythonExtractor.js";
+import type { ProgressEvent } from "../shared/types.js";
 
 let tempRoot = "";
 
@@ -66,7 +67,7 @@ describe("python order extraction bridge", () => {
   test("forwards Python file progress events", async () => {
     const filePath = path.join(tempRoot, "29698 python progress.xlsx");
     await makeWorksheetOrder(filePath);
-    const progressEvents: Array<{ index: number; total: number; filename: string; status: string }> = [];
+    const progressEvents: ProgressEvent[] = [];
 
     await runPythonOrderExtraction([filePath], {
       inferManual: true,
@@ -74,8 +75,10 @@ describe("python order extraction bridge", () => {
     });
 
     expect(progressEvents).toEqual([
-      { index: 1, total: 1, filename: path.basename(filePath), status: "running" },
-      { index: 1, total: 1, filename: path.basename(filePath), status: "completed" },
+      { index: 1, total: 1, filename: path.basename(filePath), status: "running", phase: "extracting" },
+      { index: 1, total: 1, filename: path.basename(filePath), status: "completed", phase: "extracting" },
+      { index: 1, total: 1, filename: "订单整理结果.xlsx", status: "running", phase: "writing" },
+      { index: 1, total: 1, filename: "订单整理结果.xlsx", status: "completed", phase: "writing" },
     ]);
   });
 });

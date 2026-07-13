@@ -9,6 +9,7 @@ import {
   timestampedDownloadDir,
   type EmailExtractionRequest,
 } from "./extractionService.js";
+import type { ProgressEvent } from "../shared/types.js";
 
 describe("extraction service", () => {
   test("builds default enterprise WeChat IMAP config", () => {
@@ -29,6 +30,7 @@ describe("extraction service", () => {
 
   test("fetches selected email files before running extraction", async () => {
     const calls: string[] = [];
+    const progressEvents: ProgressEvent[] = [];
     const request: EmailExtractionRequest = {
       email: "orders@example.com",
       authCode: "secret",
@@ -38,9 +40,23 @@ describe("extraction service", () => {
       downloadDir: "/tmp/orders",
     };
 
-    const result = await extractEmailOrders(request, undefined, {
+    const result = await extractEmailOrders(request, (event) => progressEvents.push(event), {
       fetchEmailOrderFiles: async (config, downloadDir, options) => {
         calls.push(`fetch:${config.email}:${downloadDir}:${options?.hours}:${options?.messageUids?.join("|")}`);
+        options?.progress?.({
+          index: 1,
+          total: 1,
+          filename: "order.xlsx",
+          status: "running",
+          phase: "downloading",
+        });
+        options?.progress?.({
+          index: 1,
+          total: 1,
+          filename: "order.xlsx",
+          status: "completed",
+          phase: "downloading",
+        });
         return {
           files: ["/tmp/orders/order.xlsx"],
           scannedMessages: 3,
@@ -50,6 +66,34 @@ describe("extraction service", () => {
       },
       runOrderExtraction: async (paths, options) => {
         calls.push(`extract:${paths.join(",")}:${options?.recursive}:${options?.inferManual}`);
+        options?.progress?.({
+          index: 1,
+          total: 1,
+          filename: "order.xlsx",
+          status: "running",
+          phase: "extracting",
+        });
+        options?.progress?.({
+          index: 1,
+          total: 1,
+          filename: "order.xlsx",
+          status: "completed",
+          phase: "extracting",
+        });
+        options?.progress?.({
+          index: 1,
+          total: 1,
+          filename: "订单整理结果.xlsx",
+          status: "running",
+          phase: "writing",
+        });
+        options?.progress?.({
+          index: 1,
+          total: 1,
+          filename: "订单整理结果.xlsx",
+          status: "completed",
+          phase: "writing",
+        });
         return {
           inputFiles: paths,
           rows: [],
@@ -70,6 +114,15 @@ describe("extraction service", () => {
       "extract:/tmp/orders/order.xlsx:false:false",
     ]);
     expect(result.emailFetch.attachmentCount).toBe(1);
+    expect(progressEvents).toEqual([
+      { index: 0, total: 1, filename: "准备提取", status: "running", phase: "preparing", percent: 2 },
+      { index: 1, total: 1, filename: "order.xlsx", status: "running", phase: "downloading", percent: 5 },
+      { index: 1, total: 1, filename: "order.xlsx", status: "completed", phase: "downloading", percent: 35 },
+      { index: 1, total: 1, filename: "order.xlsx", status: "running", phase: "extracting", percent: 35 },
+      { index: 1, total: 1, filename: "order.xlsx", status: "completed", phase: "extracting", percent: 95 },
+      { index: 1, total: 1, filename: "订单整理结果.xlsx", status: "running", phase: "writing", percent: 96 },
+      { index: 1, total: 1, filename: "订单整理结果.xlsx", status: "completed", phase: "writing", percent: 99 },
+    ]);
   });
 
   test("lists recent email messages with default one-week window", async () => {
