@@ -405,7 +405,10 @@ describe("email IMAP scanning", () => {
     });
 
     expect(result.messages.map((item) => item.uid)).toEqual(["102"]);
+    expect(result.scannedUids).toEqual(["101", "102", "103"]);
     expect(result.messages[0]?.excelAttachmentNames).toEqual(["order.xlsx"]);
+    expect(imapMock.instances).toHaveLength(1);
+    expect(imapMock.instances[0]).toMatchObject({ connectCalls: 1, logoutCalls: 1 });
     const downloadCalls = imapMock.instances.flatMap((instance) => instance.downloadManyCalls.map((call) => call.range));
     expect(downloadCalls).toEqual(["102", "103"]);
     expect(result.nonOrderExcelAttachmentCount).toBe(1);

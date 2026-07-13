@@ -83,6 +83,7 @@ export interface EmailMessageSummary {
 
 export interface EmailListResult {
   messages: EmailMessageSummary[];
+  scannedUids?: string[];
   scannedMessages: number;
   days: number;
   orderAttachmentCount?: number;

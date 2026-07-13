@@ -4,6 +4,8 @@ import type { EmailSettings, LocalMailMessageSummary, LocalMailRuntimeStatus } f
 import { openImapIdleConnection, type ImapIdleConnection } from "./imapIdleConnection.js";
 import type { LocalMailStore } from "./localMailStore.js";
 
+const FALLBACK_SCAN_MS = 15_000;
+
 export type LocalMailboxMonitorEvent =
   | { type: "messages-synced"; messages: LocalMailMessageSummary[]; initialSync: boolean }
   | { type: "status"; status: LocalMailRuntimeStatus };
@@ -80,11 +82,14 @@ export class LocalMailboxMonitor {
     while (this.running && !signal.aborted) {
       try {
         this.setStatus({ state: "connecting", detail: "正在连接企业邮箱" });
-        await this.scanOnce();
         const credentials = await this.dependencies.loadCredentials();
-        this.idle = await this.dependencies.openIdle(buildImapConfig(credentials));
+        const config = buildImapConfig(credentials);
+        const initialScan = this.scanOnce();
+        void initialScan.catch(() => undefined);
+        this.idle = await this.dependencies.openIdle(config);
         attempt = 0;
         this.setStatus({ state: "connected", detail: "邮箱已连接", lastSyncAt: new Date().toISOString() });
+        await initialScan;
         while (this.running && !signal.aborted) {
           const reason = await waitForChangeOrFallback(this.idle, signal);
           if (reason === "closed") {
@@ -179,7 +184,7 @@ async function waitForChangeOrFallback(
   try {
     return await Promise.race([
       idle.waitForChange(controller.signal),
-      delay(60_000, controller.signal).then(() => "fallback" as const),
+      delay(FALLBACK_SCAN_MS, controller.signal).then(() => "fallback" as const),
     ]);
   } finally {
     controller.abort();

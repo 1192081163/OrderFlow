@@ -72,7 +72,14 @@ class SqliteLocalMailStore implements LocalMailStore {
         extracted_at TEXT,
         PRIMARY KEY (mailbox_id, uid)
       );
+      CREATE TABLE IF NOT EXISTS mail_seen_uids (
+        mailbox_id TEXT NOT NULL,
+        uid TEXT NOT NULL,
+        seen_at TEXT NOT NULL,
+        PRIMARY KEY (mailbox_id, uid)
+      );
       CREATE INDEX IF NOT EXISTS mail_messages_received_idx ON mail_messages(received_at DESC);
+      CREATE INDEX IF NOT EXISTS mail_seen_uids_seen_idx ON mail_seen_uids(seen_at);
     `);
   }
 
@@ -82,8 +89,14 @@ class SqliteLocalMailStore implements LocalMailStore {
 
   knownUids(email: string): string[] {
     return this.db
-      .prepare("SELECT uid FROM mail_messages WHERE mailbox_id=? ORDER BY CAST(uid AS INTEGER),uid")
-      .all(mailboxIdFor(email))
+      .prepare(`
+        SELECT uid FROM (
+          SELECT uid FROM mail_seen_uids WHERE mailbox_id=?
+          UNION SELECT uid FROM mail_messages WHERE mailbox_id=?
+        )
+        ORDER BY CAST(uid AS INTEGER),uid
+      `)
+      .all(mailboxIdFor(email), mailboxIdFor(email))
       .map((row) => String((row as unknown as { uid: unknown }).uid));
   }
 
@@ -96,9 +109,16 @@ class SqliteLocalMailStore implements LocalMailStore {
       (mailbox_id,uid,subject,sender,received_at,attachment_names_json,first_seen_at,notified_at)
       VALUES (?,?,?,?,?,?,?,?)
     `);
+    const insertSeen = this.db.prepare(`
+      INSERT INTO mail_seen_uids(mailbox_id,uid,seen_at) VALUES(?,?,?)
+      ON CONFLICT(mailbox_id,uid) DO UPDATE SET seen_at=excluded.seen_at
+    `);
     const inserted: LocalMailMessageSummary[] = [];
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      for (const uid of new Set((result.scannedUids ?? result.messages.map((message) => message.uid)).map((item) => item.trim()).filter(Boolean))) {
+        insertSeen.run(mailboxId, uid, nowIso);
+      }
       for (const message of result.messages) {
         const changed = insert.run(
           mailboxId,
@@ -166,9 +186,11 @@ class SqliteLocalMailStore implements LocalMailStore {
 
   prune(): number {
     const cutoff = new Date(this.now() - 7 * 86_400_000).toISOString();
-    return Number(
+    const deletedMessages = Number(
       this.db.prepare("DELETE FROM mail_messages WHERE COALESCE(received_at,first_seen_at) < ?").run(cutoff).changes,
     );
+    this.db.prepare("DELETE FROM mail_seen_uids WHERE seen_at < ?").run(cutoff);
+    return deletedMessages;
   }
 
   close(): void {

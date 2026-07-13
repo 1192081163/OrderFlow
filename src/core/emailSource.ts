@@ -142,6 +142,7 @@ export async function listRecentEmailMessages(
   const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
   const client = createImapClient(config);
   const messages: EmailMessageSummary[] = [];
+  const scannedUids: string[] = [];
   let scannedMessages = 0;
   let candidateAttachmentCount = 0;
 
@@ -156,6 +157,7 @@ export async function listRecentEmailMessages(
 
         scannedMessages += 1;
         const summary = summarizeFetchedEmailMetadata(message);
+        scannedUids.push(summary.uid);
         candidateAttachmentCount += summary.attachmentCount;
         if (summary.hasExcelAttachments) {
           messages.push(summary);
@@ -170,6 +172,7 @@ export async function listRecentEmailMessages(
 
   return {
     messages: sortEmailMessagesByDateDesc(messages),
+    scannedUids,
     scannedMessages,
     days,
     orderAttachmentCount: candidateAttachmentCount,
@@ -181,34 +184,82 @@ export async function listRecentOrderEmailMessages(
   config: ImapConfig,
   options: OrderEmailListOptions = {},
 ): Promise<EmailListResult> {
-  const candidates = await listRecentEmailMessages(config, options);
+  return retryTransientImapConnection(() => listRecentOrderEmailMessagesOnce(config, options));
+}
+
+async function listRecentOrderEmailMessagesOnce(
+  config: ImapConfig,
+  options: OrderEmailListOptions,
+): Promise<EmailListResult> {
+  const days = options.days ?? DEFAULT_EMAIL_LIST_DAYS;
+  const now = options.now ?? new Date();
+  const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
   const excluded = new Set((options.excludeUids ?? []).map((uid) => uid.trim()).filter(Boolean));
-  const unseen = candidates.messages.filter((message) => !excluded.has(message.uid));
-  if (unseen.length === 0) {
-    return { ...candidates, messages: [], orderAttachmentCount: 0, nonOrderExcelAttachmentCount: 0 };
+  const client = createImapClient(config);
+  const candidates: Array<{ summary: EmailMessageSummary; parts: EmailAttachmentPart[] }> = [];
+  const messages: EmailMessageSummary[] = [];
+  const scannedUids: string[] = [];
+  let scannedMessages = 0;
+  let candidateCount = 0;
+
+  await client.connect();
+  try {
+    const lock = await client.getMailboxLock("INBOX");
+    try {
+      for await (const message of client.fetch({ since: cutoff }, { envelope: true, bodyStructure: true, uid: true })) {
+        if (!isMessageWithinFetchWindow(message.envelope?.date, cutoff)) {
+          continue;
+        }
+        scannedMessages += 1;
+        const summary = summarizeFetchedEmailMetadata(message);
+        scannedUids.push(summary.uid);
+        if (!summary.hasExcelAttachments || excluded.has(summary.uid)) {
+          continue;
+        }
+        const parts = findExcelAttachmentParts(message.bodyStructure);
+        candidateCount += parts.length;
+        candidates.push({ summary, parts });
+      }
+
+      for (const candidate of candidates) {
+        const downloaded = await client.downloadMany(
+          candidate.summary.uid,
+          candidate.parts.map((part) => part.part),
+          { uid: true },
+        );
+        const names: string[] = [];
+        for (const part of candidate.parts) {
+          const downloadedPart = downloaded[part.part];
+          if (!downloadedPart?.content) {
+            continue;
+          }
+          const filename = downloadedPart.meta?.filename || part.filename;
+          if (await isOrderEmailAttachment({ filename, content: toBuffer(downloadedPart.content) })) {
+            names.push(filename);
+          }
+        }
+        if (names.length > 0) {
+          messages.push({
+            ...candidate.summary,
+            attachmentCount: names.length,
+            excelAttachmentNames: names,
+            hasExcelAttachments: true,
+          });
+        }
+      }
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout().catch(() => undefined);
   }
 
-  const batch = await fetchExcelAttachments(config, { messageUids: unseen.map((message) => message.uid) });
-  const namesByUid = new Map<string, string[]>();
-  for (const attachment of batch.attachments) {
-    if (!attachment.messageUid) {
-      continue;
-    }
-    const names = namesByUid.get(attachment.messageUid) ?? [];
-    names.push(attachment.filename);
-    namesByUid.set(attachment.messageUid, names);
-  }
-  const messages = unseen.flatMap((message) => {
-    const names = namesByUid.get(message.uid) ?? [];
-    return names.length > 0
-      ? [{ ...message, attachmentCount: names.length, excelAttachmentNames: names, hasExcelAttachments: true }]
-      : [];
-  });
-  const candidateCount = unseen.reduce((sum, message) => sum + message.attachmentCount, 0);
   const orderAttachmentCount = messages.reduce((sum, message) => sum + message.attachmentCount, 0);
   return {
-    ...candidates,
     messages: sortEmailMessagesByDateDesc(messages),
+    scannedUids,
+    scannedMessages,
+    days,
     orderAttachmentCount,
     nonOrderExcelAttachmentCount: Math.max(0, candidateCount - orderAttachmentCount),
   };

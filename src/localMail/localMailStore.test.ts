@@ -18,14 +18,14 @@ describe("local mail SQLite store", () => {
   test("uses WAL and idempotently stores mailbox plus UID", async () => {
     const { databasePath } = await tempDatabase();
     store = await openLocalMailStore({ databasePath, now: () => Date.parse("2026-07-13T01:00:00Z") });
-    const first = store.syncMessages("Orders@Example.com", scan([message("101")]));
+    const first = store.syncMessages("Orders@Example.com", scan([message("101")], ["100", "101"]));
     const second = store.syncMessages("orders@example.com", scan([message("101")]));
 
     expect(first.inserted.map((item) => item.uid)).toEqual(["101"]);
     expect(first.initialSync).toBe(true);
     expect(second.inserted).toEqual([]);
     expect(second.initialSync).toBe(false);
-    expect(store.knownUids("orders@example.com")).toEqual(["101"]);
+    expect(store.knownUids("orders@example.com")).toEqual(["100", "101"]);
     expect(store.journalMode()).toBe("wal");
     expect(store.lastScannedMessages("orders@example.com")).toBe(1);
     expect(mailboxIdFor(" Orders@Example.com ")).toBe(mailboxIdFor("orders@example.com"));
@@ -74,8 +74,8 @@ async function tempDatabase(): Promise<{ root: string; databasePath: string }> {
   return { root, databasePath: path.join(root, "mail-cache.sqlite") };
 }
 
-function scan(messages: ReturnType<typeof message>[]) {
-  return { messages, scannedMessages: messages.length, days: 7, orderAttachmentCount: messages.length, nonOrderExcelAttachmentCount: 0 };
+function scan(messages: ReturnType<typeof message>[], scannedUids = messages.map((item) => item.uid)) {
+  return { messages, scannedUids, scannedMessages: messages.length, days: 7, orderAttachmentCount: messages.length, nonOrderExcelAttachmentCount: 0 };
 }
 
 function message(uid: string, date = "2026-07-13T00:00:00Z") {
