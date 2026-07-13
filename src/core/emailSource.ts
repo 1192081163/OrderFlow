@@ -19,6 +19,8 @@ const SUPPORTED_EXCEL_SUFFIXES = new Set([".xlsx", ".xlsm"]);
 const DEFAULT_EMAIL_LIST_DAYS = 7;
 const TRANSIENT_IMAP_ATTEMPTS = 3;
 
+export const MAX_ORDER_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
 export interface EmailAttachment {
   filename: string;
   content: Buffer;
@@ -42,6 +44,10 @@ export interface EmailFetchOptions {
 export interface EmailListOptions {
   days?: number;
   now?: Date;
+}
+
+export interface OrderEmailListOptions extends EmailListOptions {
+  excludeUids?: string[];
 }
 
 interface EmailAttachmentBatch {
@@ -134,7 +140,7 @@ export async function listRecentEmailMessages(
   const days = options.days ?? DEFAULT_EMAIL_LIST_DAYS;
   const now = options.now ?? new Date();
   const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-  const client = createClient(config);
+  const client = createImapClient(config);
   const messages: EmailMessageSummary[] = [];
   let scannedMessages = 0;
   let candidateAttachmentCount = 0;
@@ -169,6 +175,53 @@ export async function listRecentEmailMessages(
     orderAttachmentCount: candidateAttachmentCount,
     nonOrderExcelAttachmentCount: 0,
   };
+}
+
+export async function listRecentOrderEmailMessages(
+  config: ImapConfig,
+  options: OrderEmailListOptions = {},
+): Promise<EmailListResult> {
+  const candidates = await listRecentEmailMessages(config, options);
+  const excluded = new Set((options.excludeUids ?? []).map((uid) => uid.trim()).filter(Boolean));
+  const unseen = candidates.messages.filter((message) => !excluded.has(message.uid));
+  if (unseen.length === 0) {
+    return { ...candidates, messages: [], orderAttachmentCount: 0, nonOrderExcelAttachmentCount: 0 };
+  }
+
+  const batch = await fetchExcelAttachments(config, { messageUids: unseen.map((message) => message.uid) });
+  const namesByUid = new Map<string, string[]>();
+  for (const attachment of batch.attachments) {
+    if (!attachment.messageUid) {
+      continue;
+    }
+    const names = namesByUid.get(attachment.messageUid) ?? [];
+    names.push(attachment.filename);
+    namesByUid.set(attachment.messageUid, names);
+  }
+  const messages = unseen.flatMap((message) => {
+    const names = namesByUid.get(message.uid) ?? [];
+    return names.length > 0
+      ? [{ ...message, attachmentCount: names.length, excelAttachmentNames: names, hasExcelAttachments: true }]
+      : [];
+  });
+  const candidateCount = unseen.reduce((sum, message) => sum + message.attachmentCount, 0);
+  const orderAttachmentCount = messages.reduce((sum, message) => sum + message.attachmentCount, 0);
+  return {
+    ...candidates,
+    messages: sortEmailMessagesByDateDesc(messages),
+    orderAttachmentCount,
+    nonOrderExcelAttachmentCount: Math.max(0, candidateCount - orderAttachmentCount),
+  };
+}
+
+export async function verifyImapConnection(config: ImapConfig): Promise<void> {
+  const client = createImapClient(config);
+  await client.connect();
+  try {
+    await client.mailboxOpen("INBOX");
+  } finally {
+    await client.logout().catch(() => undefined);
+  }
 }
 
 export function summarizeParsedEmail(parsed: ParsedEmailLike, uid: string): EmailMessageSummary {
@@ -240,7 +293,7 @@ async function fetchExcelAttachments(config: ImapConfig, options: EmailFetchOpti
 }
 
 async function fetchExcelAttachmentsOnce(config: ImapConfig, options: EmailFetchOptions): Promise<EmailAttachmentBatch> {
-  const client = createClient(config);
+  const client = createImapClient(config);
   const cutoff = options.hours === undefined ? undefined : new Date(Date.now() - options.hours * 60 * 60 * 1000);
   const selectedUids = options.messageUids?.length ? new Set(options.messageUids) : undefined;
   const attachments: EmailAttachment[] = [];
@@ -352,6 +405,9 @@ function buildAttachmentFetchRange(
 }
 
 async function isOrderEmailAttachment(attachment: OrderAttachmentCandidate): Promise<boolean> {
+  if (attachment.content.byteLength > MAX_ORDER_ATTACHMENT_BYTES) {
+    return false;
+  }
   return isOrderWorkbookContent(attachment.filename, attachment.content);
 }
 
@@ -427,7 +483,7 @@ function normalizeEnvelopeDate(date: Date | undefined): string | undefined {
   return date.toISOString();
 }
 
-function createClient(config: ImapConfig): ImapFlow {
+export function createImapClient(config: ImapConfig): ImapFlow {
   return new ImapFlow({
     host: config.server,
     port: config.port,
@@ -436,7 +492,6 @@ function createClient(config: ImapConfig): ImapFlow {
       user: config.email,
       pass: config.authCode,
     },
-    ...(config.proxy ? { proxy: config.proxy } : {}),
     logger: false,
   });
 }

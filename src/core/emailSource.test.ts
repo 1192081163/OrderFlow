@@ -10,13 +10,16 @@ import {
   fetchEmailOrderFiles,
   isExcelAttachmentName,
   isMessageWithinFetchWindow,
+  listRecentOrderEmailMessages,
   listRecentEmailMessages,
+  MAX_ORDER_ATTACHMENT_BYTES,
   saveEmailAttachments,
   sanitizeAttachmentName,
   shouldIncludeMessageUid,
   sortEmailMessagesByDateDesc,
   summarizeParsedEmail,
   summarizeParsedOrderEmail,
+  verifyImapConnection,
   type EmailAttachment,
 } from "./emailSource.js";
 import type { ImapConfig } from "../shared/types.js";
@@ -69,6 +72,10 @@ vi.mock("imapflow", () => {
           this.releasedLocks += 1;
         },
       };
+    }
+
+    async mailboxOpen(mailbox: string): Promise<void> {
+      this.lockedMailbox = mailbox;
     }
 
     async *fetch(range: unknown, query: unknown, options?: unknown): AsyncGenerator<unknown> {
@@ -274,23 +281,17 @@ describe("email fetch windows", () => {
 });
 
 describe("email IMAP scanning", () => {
-  test("passes configured proxy to the IMAP client", async () => {
-    await listRecentEmailMessages(
-      {
-        ...testImapConfig(),
-        proxy: "socks5://127.0.0.1:7891",
-      },
-      {
-        days: 1,
-        now: new Date("2026-06-18T00:00:00.000Z"),
-      },
-    );
-
+  test("always creates a direct verified TLS IMAP client", async () => {
+    await verifyImapConnection({ ...testImapConfig(), proxy: "socks5://127.0.0.1:7891" });
     expect(imapMock.instances[0]?.options).toMatchObject({
       host: "imap.example.com",
       port: 993,
-      proxy: "socks5://127.0.0.1:7891",
+      secure: true,
+      auth: { user: "orders@example.com", pass: "secret" },
+      logger: false,
     });
+    expect(imapMock.instances[0]?.options).not.toHaveProperty("proxy");
+    expect(imapMock.instances[0]).toMatchObject({ connectCalls: 1, lockedMailbox: "INBOX", logoutCalls: 1 });
   });
 
   test("lists candidate order emails from metadata without fetching full message source", async () => {
@@ -395,6 +396,47 @@ describe("email IMAP scanning", () => {
     expect(imapMock.instances).toHaveLength(2);
     expect(imapMock.instances[0]?.fetchCalls).toEqual([]);
     expect(imapMock.instances[1]?.fetchCalls).toHaveLength(1);
+  });
+
+  test("downloads only unseen candidate UIDs and returns only valid order workbooks", async () => {
+    imapMock.messages = [
+      makeMetadataMessage({ uid: 101, subject: "PO 101", date: new Date("2026-06-17T03:00:00Z"), attachments: ["known.xlsx"] }),
+      makeMetadataMessage({ uid: 102, subject: "PO 102", date: new Date("2026-06-17T04:00:00Z"), attachments: ["order.xlsx"] }),
+      makeMetadataMessage({ uid: 103, subject: "Report", date: new Date("2026-06-17T05:00:00Z"), attachments: ["report.xlsx"] }),
+    ];
+    imapMock.downloads = {
+      "102": { "1": { content: await makeOrderWorkbookBuffer(), meta: { filename: "order.xlsx" } } },
+      "103": { "1": { content: await makeReportWorkbookBuffer(), meta: { filename: "report.xlsx" } } },
+    };
+
+    const result = await listRecentOrderEmailMessages(testImapConfig(), {
+      days: 7,
+      now: new Date("2026-06-18T00:00:00Z"),
+      excludeUids: ["101"],
+    });
+
+    expect(result.messages.map((item) => item.uid)).toEqual(["102"]);
+    expect(result.messages[0]?.excelAttachmentNames).toEqual(["order.xlsx"]);
+    const downloadCalls = imapMock.instances.flatMap((instance) => instance.downloadManyCalls.map((call) => call.range));
+    expect(downloadCalls).toEqual(["102", "103"]);
+    expect(result.nonOrderExcelAttachmentCount).toBe(1);
+  });
+
+  test("rejects order-looking candidates larger than 25 MB before classification", async () => {
+    imapMock.messages = [
+      makeMetadataMessage({ uid: 104, subject: "Large", date: new Date("2026-06-17T05:00:00Z"), attachments: ["large.xlsx"] }),
+    ];
+    imapMock.downloads = {
+      "104": { "1": { content: Buffer.alloc(MAX_ORDER_ATTACHMENT_BYTES + 1), meta: { filename: "large.xlsx" } } },
+    };
+
+    const result = await listRecentOrderEmailMessages(testImapConfig(), {
+      days: 7,
+      now: new Date("2026-06-18T00:00:00Z"),
+    });
+
+    expect(result.messages).toEqual([]);
+    expect(result.nonOrderExcelAttachmentCount).toBe(1);
   });
 });
 
