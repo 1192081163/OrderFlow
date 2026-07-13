@@ -69,7 +69,6 @@ export interface EmailSettings {
 export interface ImapConfig extends EmailSettings {
   server: string;
   port: number;
-  proxy?: string;
 }
 
 export interface EmailMessageSummary {
@@ -88,17 +87,6 @@ export interface EmailListResult {
   days: number;
   orderAttachmentCount?: number;
   nonOrderExcelAttachmentCount?: number;
-}
-
-export interface EmailNewMessagesEvent {
-  email: string;
-  days: number;
-  messages: EmailMessageSummary[];
-}
-
-export interface NewOrderEmailNotification {
-  title: string;
-  body: string;
 }
 
 export interface UpdateCheckResult {

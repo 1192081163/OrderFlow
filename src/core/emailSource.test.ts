@@ -272,7 +272,7 @@ describe("email fetch windows", () => {
 
 describe("email IMAP scanning", () => {
   test("always creates a direct verified TLS IMAP client", async () => {
-    await verifyImapConnection({ ...testImapConfig(), proxy: "socks5://127.0.0.1:7891" });
+    await verifyImapConnection(testImapConfig());
     expect(imapMock.instances[0]?.options).toMatchObject({
       host: "imap.example.com",
       port: 993,
@@ -280,7 +280,6 @@ describe("email IMAP scanning", () => {
       auth: { user: "orders@example.com", pass: "secret" },
       logger: false,
     });
-    expect(imapMock.instances[0]?.options).not.toHaveProperty("proxy");
     expect(imapMock.instances[0]).toMatchObject({ connectCalls: 1, lockedMailbox: "INBOX", logoutCalls: 1 });
   });
 

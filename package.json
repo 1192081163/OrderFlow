@@ -33,13 +33,11 @@
     "dist:mac:ci": "npm run build && electron-builder --mac dmg --publish never",
     "pack:win": "electron-builder --win portable --publish never",
     "pack:mac": "electron-builder --mac dmg --publish never",
-    "serve:email-api": "npm run build:main && node dist/server/main.js",
     "start": "npm run build && electron .",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "@types/mailparser": "^3.4.6",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
@@ -54,7 +52,6 @@
     "@fluentui/react-components": "^9.74.1",
     "exceljs": "^4.4.0",
     "imapflow": "^1.2.1",
-    "mailparser": "^3.9.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
@@ -95,8 +92,8 @@
         "to": "python/rules"
       },
       {
-        "from": "resources/remote-email-api.json",
-        "to": "config/remote-email-api.json"
+        "from": "assets/app_icon.png",
+        "to": "assets/app_icon.png"
       }
     ],
     "win": {

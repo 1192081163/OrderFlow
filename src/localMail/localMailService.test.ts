@@ -14,7 +14,6 @@ describe("local mail service", () => {
       authCode: "new-secret",
       server: "imap.exmail.qq.com",
       port: 993,
-      proxy: undefined,
     });
     expect(fixture.verify.mock.invocationCallOrder[0]).toBeLessThan(fixture.credentials.save.mock.invocationCallOrder[0]!);
     expect(fixture.setStartAtLogin).toHaveBeenCalledWith(true);

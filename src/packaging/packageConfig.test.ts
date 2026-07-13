@@ -12,6 +12,7 @@ describe("Electron packaging configuration", () => {
       description?: string;
       author?: string;
       scripts: Record<string, string>;
+      dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
       license?: string;
       repository?: { type?: string; url?: string };
@@ -53,6 +54,8 @@ describe("Electron packaging configuration", () => {
     expect(packageJson.scripts["dist:mac"]).toBe("npm run build && electron-builder --mac dmg");
     expect(packageJson.scripts["dist:mac:ci"]).toBe("npm run build && electron-builder --mac dmg --publish never");
     expect(packageJson.scripts["pack:mac"]).toBe("electron-builder --mac dmg --publish never");
+    expect(packageJson.scripts).not.toHaveProperty("serve:email-api");
+    expect(packageJson.dependencies).not.toHaveProperty("mailparser");
     expect(packageJson.build).toMatchObject({
       appId: "com.ausmet.orderflow.desktop",
       productName: "订单整理助手",
@@ -65,7 +68,7 @@ describe("Electron packaging configuration", () => {
         { from: "desktop_runner.py", to: "python/desktop_runner.py" },
         { from: "extract.py", to: "python/extract.py" },
         { from: "rules", to: "python/rules" },
-        { from: "resources/remote-email-api.json", to: "config/remote-email-api.json" },
+        { from: "assets/app_icon.png", to: "assets/app_icon.png" },
       ],
       win: {
         target: ["portable"],
@@ -86,7 +89,7 @@ describe("Electron packaging configuration", () => {
     });
     expect(tsconfigBuild).toMatchObject({
       extends: "./tsconfig.json",
-      include: ["src/core/**/*.ts", "src/main/**/*.ts", "src/preload/**/*.cts", "src/server/**/*.ts", "src/shared/**/*.ts"],
+      include: ["src/core/**/*.ts", "src/localMail/**/*.ts", "src/main/**/*.ts", "src/preload/**/*.cts", "src/shared/**/*.ts"],
       exclude: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     });
     expect(macSignScript).toContain('electronPlatformName !== "darwin"');

@@ -22,7 +22,6 @@ export interface EmailConnectionRequest {
   authCode: string;
   server?: string;
   port?: number;
-  proxy?: string;
 }
 
 export interface EmailExtractionRequest extends EmailConnectionRequest {
@@ -119,7 +118,6 @@ export function buildImapConfig(settings: EmailConnectionRequest): ImapConfig {
     authCode,
     server: settings.server?.trim() || DEFAULT_IMAP_SERVER,
     port: settings.port && Number.isFinite(settings.port) ? settings.port : DEFAULT_IMAP_PORT,
-    proxy: settings.proxy?.trim() || undefined,
   };
 }
 
