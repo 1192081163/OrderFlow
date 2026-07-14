@@ -38,6 +38,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@fluentui/react-components": "^9.74.1",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
@@ -45,15 +46,14 @@
     "electron": "^39.2.6",
     "electron-builder": "^26.15.3",
     "exceljs": "^4.4.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "typescript": "^5.9.3",
     "vite": "^8.0.16",
     "vitest": "^4.0.14"
   },
   "dependencies": {
-    "@fluentui/react-components": "^9.74.1",
-    "imapflow": "^1.2.1",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "imapflow": "^1.2.1"
   },
   "overrides": {
     "uuid": "11.1.1"
@@ -66,6 +66,7 @@
       "en",
       "zh-CN"
     ],
+    "npmRebuild": false,
     "directories": {
       "output": "release"
     },
@@ -79,22 +80,6 @@
       {
         "from": "python-helper",
         "to": "python-helper"
-      },
-      {
-        "from": "python_extraction_bridge.py",
-        "to": "python/python_extraction_bridge.py"
-      },
-      {
-        "from": "desktop_runner.py",
-        "to": "python/desktop_runner.py"
-      },
-      {
-        "from": "extract.py",
-        "to": "python/extract.py"
-      },
-      {
-        "from": "rules",
-        "to": "python/rules"
       },
       {
         "from": "assets/app_icon.png",

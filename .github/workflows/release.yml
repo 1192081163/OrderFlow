@@ -45,7 +45,7 @@ jobs:
           cache-dependency-path: requirements-python-runner.txt
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Install Python runner dependencies
         run: python -m pip install -r requirements-python-runner.txt pytest
@@ -101,7 +101,7 @@ jobs:
           key: ${{ runner.os }}-python-runner-${{ hashFiles('requirements-python-runner.txt', 'python_extraction_bridge.py', 'desktop_runner.py', 'extract.py', 'rules/**', 'scripts/build-python-runner-win.ps1') }}
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Install Python runner dependencies
         if: steps.cache-python-runner.outputs.cache-hit != 'true'
@@ -126,6 +126,7 @@ jobs:
           name: ${{ env.ASSET_BASENAME }}-windows.exe
           path: release/${{ env.ASSET_BASENAME }}-windows.exe
           if-no-files-found: error
+          compression-level: 0
 
       - name: Enforce Gitee 100 MB asset limit
         shell: pwsh
@@ -174,7 +175,7 @@ jobs:
           key: ${{ runner.os }}-python-runner-${{ hashFiles('requirements-python-runner.txt', 'python_extraction_bridge.py', 'desktop_runner.py', 'extract.py', 'rules/**', 'scripts/build-python-runner-mac.sh') }}
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Install Python runner dependencies
         if: steps.cache-python-runner.outputs.cache-hit != 'true'
@@ -198,6 +199,7 @@ jobs:
           name: ${{ env.ASSET_BASENAME }}-mac.dmg
           path: release/${{ env.ASSET_BASENAME }}-mac.dmg
           if-no-files-found: error
+          compression-level: 0
 
   publish-release:
     name: Publish Release
@@ -288,7 +290,7 @@ jobs:
           GITEE_TARGET: ${{ github.sha }}
         run: |
           mkdir -p release-assets/gitee
-          split --bytes=8M --numeric-suffixes=0 --suffix-length=2 \
+          split --bytes=4M --numeric-suffixes=0 --suffix-length=2 \
             release-assets/orderflow-desktop-windows.exe \
             release-assets/gitee/orderflow-desktop-windows.exe.part-
           sha256sum release-assets/orderflow-desktop-windows.exe \

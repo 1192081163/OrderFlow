@@ -19,10 +19,13 @@ describe("renderer React stack", () => {
     };
     const tsConfigJson = JSON.parse(tsConfig) as { include: string[] };
 
-    expect(packageJson.dependencies).toHaveProperty("react");
-    expect(packageJson.dependencies).toHaveProperty("react-dom");
-    expect(packageJson.dependencies).toHaveProperty("@fluentui/react-components");
+    expect(packageJson.dependencies).not.toHaveProperty("react");
+    expect(packageJson.dependencies).not.toHaveProperty("react-dom");
+    expect(packageJson.dependencies).not.toHaveProperty("@fluentui/react-components");
     expect(packageJson.dependencies).not.toHaveProperty("@fluentui/web-components");
+    expect(packageJson.devDependencies).toHaveProperty("react");
+    expect(packageJson.devDependencies).toHaveProperty("react-dom");
+    expect(packageJson.devDependencies).toHaveProperty("@fluentui/react-components");
     expect(packageJson.devDependencies).toHaveProperty("@vitejs/plugin-react");
     expect(packageJson.devDependencies).toHaveProperty("@types/react");
     expect(packageJson.devDependencies).toHaveProperty("@types/react-dom");

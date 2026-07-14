@@ -44,6 +44,12 @@ describe("Electron packaging configuration", () => {
     expect(packageJson.keywords).toEqual(expect.arrayContaining(["electron", "order-extraction", "excel", "imap"]));
     expect(packageJson.overrides).toMatchObject({ uuid: "11.1.1" });
     expect(packageJson.devDependencies).toHaveProperty("electron-builder");
+    expect(packageJson.dependencies).toEqual({ imapflow: expect.any(String) });
+    expect(packageJson.devDependencies).toMatchObject({
+      "@fluentui/react-components": expect.any(String),
+      react: expect.any(String),
+      "react-dom": expect.any(String),
+    });
     expect(packageJson.scripts["clean:dist"]).toContain("rmSync('dist'");
     expect(packageJson.scripts.build).toBe("npm run clean:dist && npm run build:main && npm run build:renderer");
     expect(packageJson.scripts["build:main"]).toBe("tsc -p tsconfig.build.json");
@@ -61,15 +67,12 @@ describe("Electron packaging configuration", () => {
       productName: "订单整理助手",
       compression: "maximum",
       electronLanguages: ["en", "zh-CN"],
+      npmRebuild: false,
       directories: { output: "release" },
       afterPack: "scripts/sign-mac-app.mjs",
       files: ["dist/**/*", "!dist/**/*.test.js", "package.json"],
       extraResources: [
         { from: "python-helper", to: "python-helper" },
-        { from: "python_extraction_bridge.py", to: "python/python_extraction_bridge.py" },
-        { from: "desktop_runner.py", to: "python/desktop_runner.py" },
-        { from: "extract.py", to: "python/extract.py" },
-        { from: "rules", to: "python/rules" },
         { from: "assets/app_icon.png", to: "assets/app_icon.png" },
       ],
       win: {
@@ -114,7 +117,8 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("actions/setup-node@v6");
     expect(workflow).toContain("actions/setup-python@v6");
     expect(workflow).toContain("cache: pip");
-    expect(workflow).toContain("npm ci");
+    expect(workflow).toContain("npm ci --no-audit --no-fund");
+    expect(workflow).not.toMatch(/run: npm ci\s*$/m);
     expect(workflow).toContain("requirements-python-runner.txt");
     expect(workflow).toContain("python -m pytest -q tests/test_desktop_runner.py tests/test_hardware_rules.py tests/test_jobtrack_compare.py");
     expect(workflow).toContain("Write release build info");
@@ -146,6 +150,7 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("Enforce Gitee 100 MB asset limit");
     expect(workflow).toContain("100MB");
     expect(workflow).toContain("orderflow-desktop-mac.dmg");
+    expect(workflow.match(/compression-level: 0/g)).toHaveLength(2);
     expect(workflow).not.toContain("--win nsis");
     expect(workflow).not.toContain("build-windows:\n    name: Build Windows Installer\n    runs-on: windows-latest\n    needs: test");
     expect(workflow).toContain("needs:\n      - test\n      - build-windows\n      - build-macos");
@@ -160,10 +165,14 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("git -c http.version=HTTP/1.1 push gitee HEAD:main --tags --force");
     expect(workflow).toContain("timeout 180s");
     expect(workflow).toContain("scripts/publish-gitee-release.sh");
-    expect(workflow).toContain("split --bytes=8M");
+    expect(workflow).toContain("split --bytes=4M");
+    expect(workflow).not.toContain("split --bytes=8M");
     expect(workflow).toContain("orderflow-desktop-windows.exe.sha256");
     expect(workflow).not.toContain("macos-dmg");
     expect(workflow).not.toContain("macos.dmg");
     expect(workflow).not.toContain("requirements-desktop.txt");
+
+    const giteePublisher = await readFile(path.join(root, "scripts/publish-gitee-release.sh"), "utf8");
+    expect(giteePublisher).toContain("upload_pids+set");
   });
 });
