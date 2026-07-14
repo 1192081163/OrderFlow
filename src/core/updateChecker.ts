@@ -8,8 +8,24 @@ import { CURRENT_RELEASE_TAG } from "./buildInfo.js";
 const require = createRequire(import.meta.url);
 const packageJson = require("../../package.json") as { version?: string };
 
-export const RELEASE_API_URL = "https://api.github.com/repos/1192081163/orderflow-desktop/releases/latest";
+export const GITEE_RELEASE_API_URL = "https://gitee.com/api/v5/repos/wei-dongyu_1_0/OrderFlow/releases/latest";
+export const GITHUB_RELEASE_API_URL = "https://api.github.com/repos/1192081163/OrderFlow/releases/latest";
+export const RELEASE_API_URL = GITEE_RELEASE_API_URL;
+export const RELEASE_API_URLS = [GITEE_RELEASE_API_URL, GITHUB_RELEASE_API_URL] as const;
 export const WINDOWS_ASSET_NAME = "orderflow-desktop-windows.exe";
+
+const RELEASE_SOURCES = [
+  {
+    name: "Gitee",
+    apiUrl: GITEE_RELEASE_API_URL,
+    releaseUrl: (tag: string) => `https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/tag/${encodeURIComponent(tag)}`,
+  },
+  {
+    name: "GitHub",
+    apiUrl: GITHUB_RELEASE_API_URL,
+    releaseUrl: (tag: string) => `https://github.com/1192081163/OrderFlow/releases/tag/${encodeURIComponent(tag)}`,
+  },
+] as const;
 
 interface ReleaseAsset {
   name?: unknown;
@@ -76,23 +92,40 @@ export function updateInfoFromReleasePayload(
 
 export async function checkForUpdates(fetchImpl = fetch): Promise<UpdateCheckResult> {
   const currentVersion = packageJson.version ?? "1.0.0";
-  try {
-    const response = await fetchImpl(RELEASE_API_URL, {
-      headers: { "User-Agent": `orderflow-desktop/${currentVersion}` },
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+  const errors: string[] = [];
+
+  for (const source of RELEASE_SOURCES) {
+    try {
+      const response = await fetchImpl(source.apiUrl, {
+        headers: { "User-Agent": `orderflow-desktop/${currentVersion}` },
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const payload = (await response.json()) as ReleasePayload;
+      const latestTag = String(payload.tag_name ?? "").trim();
+      const result = updateInfoFromReleasePayload(
+        {
+          ...payload,
+          html_url: payload.html_url || (latestTag ? source.releaseUrl(latestTag) : ""),
+        },
+        { currentVersion, currentReleaseTag: CURRENT_RELEASE_TAG },
+      );
+      if (result.reason !== "missing_asset") {
+        return result;
+      }
+      errors.push(`${source.name}: ${result.error ?? "未找到更新文件"}`);
+    } catch (error) {
+      errors.push(`${source.name}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    const payload = (await response.json()) as ReleasePayload;
-    return updateInfoFromReleasePayload(payload, { currentVersion, currentReleaseTag: CURRENT_RELEASE_TAG });
-  } catch (error) {
-    return {
-      updateAvailable: false,
-      currentVersion,
-      reason: "error",
-      error: `检查更新失败：${error instanceof Error ? error.message : String(error)}`,
-    };
   }
+
+  return {
+    updateAvailable: false,
+    currentVersion,
+    reason: "error",
+    error: `检查更新失败：${errors.join("；")}`,
+  };
 }
 
 export async function downloadUpdateExecutable(
@@ -159,8 +192,13 @@ function assertOfficialDownloadUrl(value: string): void {
   } catch {
     throw new Error("更新下载地址无效，已拒绝下载。");
   }
-  const officialPath = /^\/1192081163\/(?:orderflow-desktop|OrderFlow)\/releases\/download\//i;
-  if (url.protocol !== "https:" || url.hostname !== "github.com" || !officialPath.test(url.pathname)) {
+  const isOfficialGitHub =
+    url.hostname === "github.com" && /^\/1192081163\/(?:orderflow-desktop|OrderFlow)\/releases\/download\//i.test(url.pathname);
+  const isOfficialGitee =
+    url.hostname === "gitee.com" &&
+    (/^\/wei-dongyu_1_0\/OrderFlow\/releases\/download\//i.test(url.pathname) ||
+      /^\/api\/v5\/repos\/wei-dongyu_1_0\/OrderFlow\/releases\/\d+\/attach_files\/\d+\/download$/i.test(url.pathname));
+  if (url.protocol !== "https:" || (!isOfficialGitHub && !isOfficialGitee)) {
     throw new Error("更新文件来自非官方地址，已拒绝下载。");
   }
 }

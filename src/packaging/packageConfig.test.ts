@@ -59,6 +59,8 @@ describe("Electron packaging configuration", () => {
     expect(packageJson.build).toMatchObject({
       appId: "com.ausmet.orderflow.desktop",
       productName: "订单整理助手",
+      compression: "maximum",
+      electronLanguages: ["en", "zh-CN"],
       directories: { output: "release" },
       afterPack: "scripts/sign-mac-app.mjs",
       files: ["dist/**/*", "!dist/**/*.test.js", "package.json"],
@@ -141,6 +143,8 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("build-macos:");
     expect(workflow).toContain("runs-on: macos-latest");
     expect(workflow).toContain("orderflow-desktop-windows.exe");
+    expect(workflow).toContain("Enforce Gitee 100 MB asset limit");
+    expect(workflow).toContain("100MB");
     expect(workflow).toContain("orderflow-desktop-mac.dmg");
     expect(workflow).not.toContain("--win nsis");
     expect(workflow).not.toContain("build-windows:\n    name: Build Windows Installer\n    runs-on: windows-latest\n    needs: test");
@@ -151,6 +155,10 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("Windows 下载 orderflow-desktop-windows.exe");
     expect(workflow).toContain("Mac 下载 orderflow-desktop-mac.dmg");
     expect(workflow).toContain("--latest");
+    expect(workflow).toContain("publish-gitee-release:");
+    expect(workflow).toContain("GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}");
+    expect(workflow).toContain("git push gitee HEAD:main --force");
+    expect(workflow).toContain("scripts/publish-gitee-release.sh");
     expect(workflow).not.toContain("macos-dmg");
     expect(workflow).not.toContain("macos.dmg");
     expect(workflow).not.toContain("requirements-desktop.txt");

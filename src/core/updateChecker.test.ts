@@ -7,6 +7,8 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   checkForUpdates,
   downloadUpdateExecutable,
+  GITEE_RELEASE_API_URL,
+  GITHUB_RELEASE_API_URL,
   updateInfoFromReleasePayload,
   WINDOWS_ASSET_NAME,
 } from "./updateChecker.js";
@@ -88,6 +90,35 @@ describe("update checker", () => {
     expect(result.error).toContain("network down");
   });
 
+  test("checks Gitee before GitHub", async () => {
+    const urls: string[] = [];
+    const result = await checkForUpdates(async (url) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify({ tag_name: "v1.0.0", assets: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    expect(urls).toEqual([GITEE_RELEASE_API_URL]);
+    expect(result.reason).toBe("current");
+  });
+
+  test("falls back to GitHub when Gitee is unavailable", async () => {
+    const urls: string[] = [];
+    const result = await checkForUpdates(async (url) => {
+      urls.push(String(url));
+      if (String(url) === GITEE_RELEASE_API_URL) {
+        return new Response("unavailable", { status: 503 });
+      }
+      return new Response(JSON.stringify({ tag_name: "v1.0.0", assets: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    expect(urls).toEqual([GITEE_RELEASE_API_URL, GITHUB_RELEASE_API_URL]);
+    expect(result.reason).toBe("current");
+  });
+
   test("downloads update executable to a unique local path", async () => {
     const downloadDir = await mkdtemp(path.join(os.tmpdir(), "orderflow-update-"));
     tempDirs.push(downloadDir);
@@ -113,6 +144,31 @@ describe("update checker", () => {
     expect(path.basename(executablePath)).toBe("orderflow-desktop-windows-1.exe");
     expect(await readFile(executablePath, "utf8")).toBe("new executable");
     await expect(access(`${executablePath}.download`)).rejects.toBeTruthy();
+  });
+
+  test("downloads an update executable from the official Gitee repository", async () => {
+    const downloadDir = await mkdtemp(path.join(os.tmpdir(), "orderflow-update-"));
+    tempDirs.push(downloadDir);
+    const downloadUrl =
+      "https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/download/build-42/orderflow-desktop-windows.exe";
+
+    const executablePath = await downloadUpdateExecutable(
+      {
+        updateAvailable: true,
+        currentVersion: "1.0.0",
+        latestVersion: "build-42",
+        assetName: WINDOWS_ASSET_NAME,
+        downloadUrl,
+        reason: "newer_version",
+      },
+      downloadDir,
+      async (url) => {
+        expect(url).toBe(downloadUrl);
+        return new Response(new TextEncoder().encode("gitee executable"));
+      },
+    );
+
+    expect(await readFile(executablePath, "utf8")).toBe("gitee executable");
   });
 
   test("rejects executable download when release has no downloadable asset", async () => {

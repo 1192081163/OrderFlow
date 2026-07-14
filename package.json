@@ -61,6 +61,11 @@
   "build": {
     "appId": "com.ausmet.orderflow.desktop",
     "productName": "订单整理助手",
+    "compression": "maximum",
+    "electronLanguages": [
+      "en",
+      "zh-CN"
+    ],
     "directories": {
       "output": "release"
     },

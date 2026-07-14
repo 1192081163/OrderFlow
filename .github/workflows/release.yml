@@ -127,6 +127,14 @@ jobs:
           path: release/${{ env.ASSET_BASENAME }}-windows.exe
           if-no-files-found: error
 
+      - name: Enforce Gitee 100 MB asset limit
+        shell: pwsh
+        run: |
+          $asset = Get-Item "release/${{ env.ASSET_BASENAME }}-windows.exe"
+          if ($asset.Length -ge 100MB) {
+            throw "Windows artifact is $($asset.Length) bytes; Gitee requires it to be smaller than 100 MB."
+          }
+
   build-macos:
     name: Build macOS DMG
     if: github.event_name != 'pull_request'
@@ -230,3 +238,45 @@ jobs:
             --notes "Windows 便携版和 macOS DMG 已自动生成。Windows 下载 orderflow-desktop-windows.exe；Mac 下载 orderflow-desktop-mac.dmg。" \
             --target "$GITHUB_SHA" \
             --latest
+
+  publish-gitee-release:
+    name: Mirror Source and Publish Gitee Release
+    runs-on: ubuntu-latest
+    needs:
+      - publish-release
+    if: github.ref == 'refs/heads/main'
+    env:
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      GITEE_USERNAME: wei-dongyu_1_0
+      GITEE_REPOSITORY: wei-dongyu_1_0/OrderFlow
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Require Gitee release credentials
+        shell: bash
+        run: test -n "$GITEE_TOKEN"
+
+      - name: Mirror source and tags to Gitee
+        shell: bash
+        run: |
+          git remote add gitee "https://${GITEE_USERNAME}:${GITEE_TOKEN}@gitee.com/${GITEE_REPOSITORY}.git"
+          git push gitee HEAD:main --force
+          git push gitee --tags --force
+          git remote remove gitee
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.ASSET_BASENAME }}-windows.exe
+          path: release-assets
+
+      - name: Publish Gitee Windows release
+        shell: bash
+        env:
+          GITEE_TAG: build-${{ github.run_number }}
+          GITEE_TARGET: ${{ github.sha }}
+          GITEE_ASSET: release-assets/orderflow-desktop-windows.exe
+        run: bash ./scripts/publish-gitee-release.sh
