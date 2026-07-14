@@ -288,7 +288,7 @@ jobs:
           GITEE_TARGET: ${{ github.sha }}
         run: |
           mkdir -p release-assets/gitee
-          split --bytes=16M --numeric-suffixes=0 --suffix-length=2 \
+          split --bytes=8M --numeric-suffixes=0 --suffix-length=2 \
             release-assets/orderflow-desktop-windows.exe \
             release-assets/gitee/orderflow-desktop-windows.exe.part-
           sha256sum release-assets/orderflow-desktop-windows.exe \

@@ -160,7 +160,7 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("git -c http.version=HTTP/1.1 push gitee HEAD:main --tags --force");
     expect(workflow).toContain("timeout 180s");
     expect(workflow).toContain("scripts/publish-gitee-release.sh");
-    expect(workflow).toContain("split --bytes=16M");
+    expect(workflow).toContain("split --bytes=8M");
     expect(workflow).toContain("orderflow-desktop-windows.exe.sha256");
     expect(workflow).not.toContain("macos-dmg");
     expect(workflow).not.toContain("macos.dmg");

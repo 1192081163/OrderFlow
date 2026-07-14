@@ -68,16 +68,62 @@ release=$(curl -fsS --retry 3 --max-time 60 \
   "${repo_api}/releases" <<<"$release_payload")
 release_id=$(jq -er '.id' <<<"$release")
 
-for asset in "${assets[@]}"; do
-  uploaded=$(curl -fsS --retry 3 --connect-timeout 60 --max-time 600 \
+upload_concurrency="${GITEE_UPLOAD_CONCURRENCY:-3}"
+if [[ ! "$upload_concurrency" =~ ^[1-9][0-9]*$ ]] || (( upload_concurrency > 8 )); then
+  echo "GITEE_UPLOAD_CONCURRENCY must be an integer between 1 and 8." >&2
+  exit 2
+fi
+
+upload_dir=$(mktemp -d)
+trap 'rm -rf "$upload_dir"' EXIT
+upload_pids=()
+upload_results=()
+
+upload_asset() {
+  local asset="$1"
+  local result_file="$2"
+  local response_file="${result_file}.response"
+
+  curl -fsS --retry 3 --connect-timeout 60 --max-time 600 \
     -X POST \
     -H "$auth_header" \
     -F "file=@${asset}" \
-    "${repo_api}/releases/${release_id}/attach_files")
+    "${repo_api}/releases/${release_id}/attach_files" >"$response_file"
 
   jq -e --arg expected "$(basename "$asset")" \
     'select(.name == $expected and (.browser_download_url | type) == "string") | {id, name, size, browser_download_url}' \
-    <<<"$uploaded"
+    "$response_file" >"$result_file"
+}
+
+wait_for_upload_batch() {
+  local failed=0
+  local pid
+
+  for pid in "${upload_pids[@]}"; do
+    if ! wait "$pid"; then
+      failed=1
+    fi
+  done
+  upload_pids=()
+  (( failed == 0 ))
+}
+
+upload_index=0
+for asset in "${assets[@]}"; do
+  result_file="${upload_dir}/$(printf '%03d' "$upload_index").json"
+  upload_results+=("$result_file")
+  upload_asset "$asset" "$result_file" &
+  upload_pids+=("$!")
+  (( upload_index += 1 ))
+
+  if (( ${#upload_pids[@]} >= upload_concurrency )); then
+    wait_for_upload_batch
+  fi
+done
+wait_for_upload_batch
+
+for result_file in "${upload_results[@]}"; do
+  cat "$result_file"
 done
 
 published_payload=$(jq -n \
