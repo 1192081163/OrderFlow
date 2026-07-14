@@ -1,4 +1,5 @@
-import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, appendFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -13,6 +14,8 @@ export const GITHUB_RELEASE_API_URL = "https://api.github.com/repos/1192081163/O
 export const RELEASE_API_URL = GITEE_RELEASE_API_URL;
 export const RELEASE_API_URLS = [GITEE_RELEASE_API_URL, GITHUB_RELEASE_API_URL] as const;
 export const WINDOWS_ASSET_NAME = "orderflow-desktop-windows.exe";
+export const WINDOWS_CHECKSUM_ASSET_NAME = `${WINDOWS_ASSET_NAME}.sha256`;
+export const WINDOWS_PART_ASSET_PREFIX = `${WINDOWS_ASSET_NAME}.part-`;
 
 const RELEASE_SOURCES = [
   {
@@ -57,6 +60,7 @@ export function updateInfoFromReleasePayload(
   const latestVersion = latestTag.replace(/^v/i, "");
   const releaseUrl = String(payload.html_url ?? "");
   const asset = selectWindowsAsset(payload.assets);
+  const multipart = asset ? null : selectWindowsMultipart(payload.assets);
 
   if (!isNewerRelease(latestTag, latestVersion, currentReleaseTag, currentVersion)) {
     return {
@@ -68,7 +72,7 @@ export function updateInfoFromReleasePayload(
     };
   }
 
-  if (!asset) {
+  if (!asset && !multipart) {
     return {
       updateAvailable: false,
       currentVersion,
@@ -84,8 +88,16 @@ export function updateInfoFromReleasePayload(
     currentVersion,
     latestVersion,
     releaseUrl,
-    assetName: String(asset.name ?? ""),
-    downloadUrl: String(asset.browser_download_url ?? releaseUrl),
+    assetName: asset ? String(asset.name ?? "") : WINDOWS_ASSET_NAME,
+    ...(asset
+      ? { downloadUrl: String(asset.browser_download_url ?? releaseUrl) }
+      : {
+          downloadParts: multipart?.parts.map((part) => ({
+            assetName: String(part.name ?? ""),
+            downloadUrl: String(part.browser_download_url ?? ""),
+          })),
+          checksumUrl: String(multipart?.checksum.browser_download_url ?? ""),
+        }),
     reason: "newer_version",
   };
 }
@@ -133,28 +145,28 @@ export async function downloadUpdateExecutable(
   downloadDir: string,
   fetchImpl = fetch,
 ): Promise<string> {
-  if (!update.updateAvailable || !update.downloadUrl || !update.assetName) {
+  const hasDirectDownload = Boolean(update.downloadUrl);
+  const hasMultipartDownload = Boolean(update.downloadParts?.length && update.checksumUrl);
+  if (!update.updateAvailable || !update.assetName || (!hasDirectDownload && !hasMultipartDownload)) {
     throw new Error("更新文件不存在，请稍后重试或手动下载新版 exe。");
   }
   if (update.assetName !== WINDOWS_ASSET_NAME) {
     throw new Error("更新文件名不正确，已拒绝下载。");
   }
-  assertOfficialDownloadUrl(update.downloadUrl);
 
   await mkdir(downloadDir, { recursive: true });
   const executablePath = await uniquePath(path.join(downloadDir, update.assetName));
   const tempPath = `${executablePath}.download`;
   const currentVersion = packageJson.version ?? "1.0.0";
 
-  const response = await fetchImpl(update.downloadUrl, {
-    headers: { "User-Agent": `orderflow-desktop/${currentVersion}` },
-  });
-  if (!response.ok || !response.body) {
-    throw new Error(`新版 exe 下载失败：HTTP ${response.status}`);
-  }
-
   try {
-    await writeFile(tempPath, Buffer.from(await response.arrayBuffer()));
+    if (update.downloadUrl) {
+      assertOfficialDownloadUrl(update.downloadUrl);
+      const executable = await fetchUpdateBuffer(update.downloadUrl, currentVersion, fetchImpl);
+      await writeFile(tempPath, executable);
+    } else {
+      await downloadMultipartExecutable(update, tempPath, currentVersion, fetchImpl);
+    }
     await rename(tempPath, executablePath);
   } finally {
     await rm(tempPath, { force: true });
@@ -183,6 +195,79 @@ function selectWindowsAsset(assets: unknown): ReleaseAsset | null {
       return name === WINDOWS_ASSET_NAME;
     }) ?? null
   );
+}
+
+function selectWindowsMultipart(assets: unknown): { parts: ReleaseAsset[]; checksum: ReleaseAsset } | null {
+  if (!Array.isArray(assets)) {
+    return null;
+  }
+  const releaseAssets = assets as ReleaseAsset[];
+  const parts = releaseAssets
+    .filter((asset) => String(asset.name ?? "").startsWith(WINDOWS_PART_ASSET_PREFIX))
+    .sort((left, right) => String(left.name ?? "").localeCompare(String(right.name ?? "")));
+  const checksum = releaseAssets.find((asset) => String(asset.name ?? "") === WINDOWS_CHECKSUM_ASSET_NAME);
+  const partsAreComplete =
+    parts.length >= 2 &&
+    parts.every(
+      (part, index) =>
+        String(part.name ?? "") === `${WINDOWS_PART_ASSET_PREFIX}${String(index).padStart(2, "0")}` &&
+        Boolean(String(part.browser_download_url ?? "")),
+    );
+  if (!checksum || !String(checksum.browser_download_url ?? "") || !partsAreComplete) {
+    return null;
+  }
+  return { parts, checksum };
+}
+
+async function downloadMultipartExecutable(
+  update: UpdateCheckResult,
+  tempPath: string,
+  currentVersion: string,
+  fetchImpl: typeof fetch,
+): Promise<void> {
+  const parts = update.downloadParts ?? [];
+  if (!update.checksumUrl || parts.length < 2) {
+    throw new Error("更新分片不完整，请稍后重试或手动下载新版 exe。");
+  }
+  const partsAreComplete = parts.every(
+    (part, index) => part.assetName === `${WINDOWS_PART_ASSET_PREFIX}${String(index).padStart(2, "0")}`,
+  );
+  if (!partsAreComplete) {
+    throw new Error("更新分片顺序不正确，已拒绝下载。");
+  }
+
+  assertOfficialDownloadUrl(update.checksumUrl);
+  const checksumPayload = await fetchUpdateBuffer(update.checksumUrl, currentVersion, fetchImpl);
+  const expectedChecksum = checksumPayload.toString("utf8").trim().match(/^([a-f0-9]{64})(?:\s|$)/i)?.[1]?.toLowerCase();
+  if (!expectedChecksum) {
+    throw new Error("更新校验文件无效，已拒绝下载。");
+  }
+
+  const hash = createHash("sha256");
+  for (const [index, part] of parts.entries()) {
+    assertOfficialDownloadUrl(part.downloadUrl);
+    const content = await fetchUpdateBuffer(part.downloadUrl, currentVersion, fetchImpl);
+    hash.update(content);
+    if (index === 0) {
+      await writeFile(tempPath, content);
+    } else {
+      await appendFile(tempPath, content);
+    }
+  }
+
+  if (hash.digest("hex") !== expectedChecksum) {
+    throw new Error("更新文件校验失败，已拒绝打开。");
+  }
+}
+
+async function fetchUpdateBuffer(url: string, currentVersion: string, fetchImpl: typeof fetch): Promise<Buffer> {
+  const response = await fetchImpl(url, {
+    headers: { "User-Agent": `orderflow-desktop/${currentVersion}` },
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`新版 exe 下载失败：HTTP ${response.status}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
 }
 
 function assertOfficialDownloadUrl(value: string): void {

@@ -1,4 +1,5 @@
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -11,6 +12,8 @@ import {
   GITHUB_RELEASE_API_URL,
   updateInfoFromReleasePayload,
   WINDOWS_ASSET_NAME,
+  WINDOWS_CHECKSUM_ASSET_NAME,
+  WINDOWS_PART_ASSET_PREFIX,
 } from "./updateChecker.js";
 
 const tempDirs: string[] = [];
@@ -78,6 +81,39 @@ describe("update checker", () => {
     expect(result.updateAvailable).toBe(false);
     expect(result.reason).toBe("missing_asset");
     expect(result.error).toContain(WINDOWS_ASSET_NAME);
+  });
+
+  test("detects a multipart Windows release with checksum", () => {
+    const result = updateInfoFromReleasePayload(
+      {
+        tag_name: "v2.0.0",
+        assets: [
+          {
+            name: `${WINDOWS_PART_ASSET_PREFIX}01`,
+            browser_download_url: "https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/download/v2.0.0/part-01",
+          },
+          {
+            name: WINDOWS_CHECKSUM_ASSET_NAME,
+            browser_download_url: "https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/download/v2.0.0/checksum",
+          },
+          {
+            name: `${WINDOWS_PART_ASSET_PREFIX}00`,
+            browser_download_url: "https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/download/v2.0.0/part-00",
+          },
+        ],
+      },
+      "1.0.0",
+    );
+
+    expect(result).toMatchObject({
+      updateAvailable: true,
+      assetName: WINDOWS_ASSET_NAME,
+      checksumUrl: "https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/download/v2.0.0/checksum",
+      downloadParts: [
+        { assetName: `${WINDOWS_PART_ASSET_PREFIX}00` },
+        { assetName: `${WINDOWS_PART_ASSET_PREFIX}01` },
+      ],
+    });
   });
 
   test("returns an error result when release request fails", async () => {
@@ -165,6 +201,41 @@ describe("update checker", () => {
       async (url) => {
         expect(url).toBe(downloadUrl);
         return new Response(new TextEncoder().encode("gitee executable"));
+      },
+    );
+
+    expect(await readFile(executablePath, "utf8")).toBe("gitee executable");
+  });
+
+  test("downloads, joins, and verifies multipart Gitee updates", async () => {
+    const downloadDir = await mkdtemp(path.join(os.tmpdir(), "orderflow-update-"));
+    tempDirs.push(downloadDir);
+    const partContents = [Buffer.from("gitee "), Buffer.from("executable")];
+    const expectedChecksum = createHash("sha256").update(Buffer.concat(partContents)).digest("hex");
+    const baseUrl = "https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/download/build-44";
+    const checksumUrl = `${baseUrl}/${WINDOWS_CHECKSUM_ASSET_NAME}`;
+    const downloadParts = partContents.map((_content, index) => ({
+      assetName: `${WINDOWS_PART_ASSET_PREFIX}${String(index).padStart(2, "0")}`,
+      downloadUrl: `${baseUrl}/${WINDOWS_PART_ASSET_PREFIX}${String(index).padStart(2, "0")}`,
+    }));
+
+    const executablePath = await downloadUpdateExecutable(
+      {
+        updateAvailable: true,
+        currentVersion: "1.0.0",
+        latestVersion: "build-44",
+        assetName: WINDOWS_ASSET_NAME,
+        downloadParts,
+        checksumUrl,
+        reason: "newer_version",
+      },
+      downloadDir,
+      async (url) => {
+        if (String(url) === checksumUrl) {
+          return new Response(`${expectedChecksum}  ${WINDOWS_ASSET_NAME}\n`);
+        }
+        const index = downloadParts.findIndex((part) => part.downloadUrl === String(url));
+        return new Response(partContents[index]);
       },
     );
 

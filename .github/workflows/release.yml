@@ -286,5 +286,12 @@ jobs:
         env:
           GITEE_TAG: build-${{ github.run_number }}
           GITEE_TARGET: ${{ github.sha }}
-          GITEE_ASSET: release-assets/orderflow-desktop-windows.exe
-        run: bash ./scripts/publish-gitee-release.sh
+        run: |
+          mkdir -p release-assets/gitee
+          split --bytes=48M --numeric-suffixes=0 --suffix-length=2 \
+            release-assets/orderflow-desktop-windows.exe \
+            release-assets/gitee/orderflow-desktop-windows.exe.part-
+          sha256sum release-assets/orderflow-desktop-windows.exe \
+            | awk '{print $1 "  orderflow-desktop-windows.exe"}' \
+            > release-assets/gitee/orderflow-desktop-windows.exe.sha256
+          bash ./scripts/publish-gitee-release.sh release-assets/gitee/*
