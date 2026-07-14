@@ -157,7 +157,8 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("--latest");
     expect(workflow).toContain("publish-gitee-release:");
     expect(workflow).toContain("GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}");
-    expect(workflow).toContain("git push gitee HEAD:main --force");
+    expect(workflow).toContain("git -c http.version=HTTP/1.1 push gitee HEAD:main --tags --force");
+    expect(workflow).toContain("timeout 180s");
     expect(workflow).toContain("scripts/publish-gitee-release.sh");
     expect(workflow).not.toContain("macos-dmg");
     expect(workflow).not.toContain("macos.dmg");

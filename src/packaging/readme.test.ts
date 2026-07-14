@@ -15,7 +15,7 @@ describe("README desktop download guidance", () => {
     expect(localRunIndex).toBeGreaterThan(downloadIndex);
     expect(readme).toContain("orderflow-desktop-windows.exe");
     expect(readme).toContain("orderflow-desktop-mac.dmg");
-    expect(readme).toContain("https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/latest");
+    expect(readme).toContain("https://gitee.com/wei-dongyu_1_0/OrderFlow/releases");
     expect(readme).toContain("应用检查更新时优先访问 Gitee");
     expect(readme).toContain("双击 exe 就会直接打开软件");
     expect(readme).toContain("Mac 下载 DMG 后拖入 Applications 打开");

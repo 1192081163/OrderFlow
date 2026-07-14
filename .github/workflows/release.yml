@@ -249,6 +249,7 @@ jobs:
       GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
       GITEE_USERNAME: wei-dongyu_1_0
       GITEE_REPOSITORY: wei-dongyu_1_0/OrderFlow
+      GIT_TERMINAL_PROMPT: 0
     steps:
       - name: Checkout full history
         uses: actions/checkout@v6
@@ -263,9 +264,16 @@ jobs:
         shell: bash
         run: |
           git remote add gitee "https://${GITEE_USERNAME}:${GITEE_TOKEN}@gitee.com/${GITEE_REPOSITORY}.git"
-          git push gitee HEAD:main --force
-          git push gitee --tags --force
+          pushed=false
+          for attempt in 1 2 3; do
+            if timeout 180s git -c http.version=HTTP/1.1 push gitee HEAD:main --tags --force; then
+              pushed=true
+              break
+            fi
+            echo "Gitee mirror attempt ${attempt} failed; retrying..." >&2
+          done
           git remote remove gitee
+          test "$pushed" = true
 
       - name: Download Windows artifact
         uses: actions/download-artifact@v8

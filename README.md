@@ -4,7 +4,7 @@
 
 ## 下载桌面版
 
-普通用户不需要安装 Node.js、Python 或开发依赖。国内 Windows 用户打开 [Gitee Latest Release](https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/latest)，下载：
+普通用户不需要安装 Node.js、Python 或开发依赖。国内 Windows 用户打开 [Gitee Release](https://gitee.com/wei-dongyu_1_0/OrderFlow/releases)，下载最新版本的：
 
 ```text
 orderflow-desktop-windows.exe
