@@ -9,24 +9,31 @@ import { CURRENT_RELEASE_TAG } from "./buildInfo.js";
 const require = createRequire(import.meta.url);
 const packageJson = require("../../package.json") as { version?: string };
 
-export const GITEE_RELEASE_API_URL = "https://gitee.com/api/v5/repos/wei-dongyu_1_0/OrderFlow/releases/latest";
+export const DOWNLOAD_RELEASE_API_URL = "https://download.ausmet.ai/latest.json";
 export const GITHUB_RELEASE_API_URL = "https://api.github.com/repos/1192081163/OrderFlow/releases/latest";
-export const RELEASE_API_URL = GITEE_RELEASE_API_URL;
-export const RELEASE_API_URLS = [GITEE_RELEASE_API_URL, GITHUB_RELEASE_API_URL] as const;
+export const GITEE_RELEASE_API_URL = "https://gitee.com/api/v5/repos/wei-dongyu_1_0/OrderFlow/releases/latest";
+export const RELEASE_API_URL = DOWNLOAD_RELEASE_API_URL;
+export const RELEASE_API_URLS = [DOWNLOAD_RELEASE_API_URL, GITHUB_RELEASE_API_URL, GITEE_RELEASE_API_URL] as const;
 export const WINDOWS_ASSET_NAME = "orderflow-desktop-windows.exe";
 export const WINDOWS_CHECKSUM_ASSET_NAME = `${WINDOWS_ASSET_NAME}.sha256`;
 export const WINDOWS_PART_ASSET_PREFIX = `${WINDOWS_ASSET_NAME}.part-`;
+const RELEASE_REQUEST_TIMEOUT_MS = 10_000;
 
 const RELEASE_SOURCES = [
   {
-    name: "Gitee",
-    apiUrl: GITEE_RELEASE_API_URL,
-    releaseUrl: (tag: string) => `https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/tag/${encodeURIComponent(tag)}`,
+    name: "AUSMET Download",
+    apiUrl: DOWNLOAD_RELEASE_API_URL,
+    releaseUrl: (tag: string) => `https://download.ausmet.ai/releases/${encodeURIComponent(tag)}/`,
   },
   {
     name: "GitHub",
     apiUrl: GITHUB_RELEASE_API_URL,
     releaseUrl: (tag: string) => `https://github.com/1192081163/OrderFlow/releases/tag/${encodeURIComponent(tag)}`,
+  },
+  {
+    name: "Gitee",
+    apiUrl: GITEE_RELEASE_API_URL,
+    releaseUrl: (tag: string) => `https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/tag/${encodeURIComponent(tag)}`,
   },
 ] as const;
 
@@ -60,6 +67,7 @@ export function updateInfoFromReleasePayload(
   const latestVersion = latestTag.replace(/^v/i, "");
   const releaseUrl = String(payload.html_url ?? "");
   const asset = selectWindowsAsset(payload.assets);
+  const checksum = asset ? selectAsset(payload.assets, WINDOWS_CHECKSUM_ASSET_NAME) : null;
   const multipart = asset ? null : selectWindowsMultipart(payload.assets);
 
   if (!isNewerRelease(latestTag, latestVersion, currentReleaseTag, currentVersion)) {
@@ -90,7 +98,10 @@ export function updateInfoFromReleasePayload(
     releaseUrl,
     assetName: asset ? String(asset.name ?? "") : WINDOWS_ASSET_NAME,
     ...(asset
-      ? { downloadUrl: String(asset.browser_download_url ?? releaseUrl) }
+      ? {
+          downloadUrl: String(asset.browser_download_url ?? releaseUrl),
+          ...(checksum ? { checksumUrl: String(checksum.browser_download_url ?? "") } : {}),
+        }
       : {
           downloadParts: multipart?.parts.map((part) => ({
             assetName: String(part.name ?? ""),
@@ -102,14 +113,19 @@ export function updateInfoFromReleasePayload(
   };
 }
 
-export async function checkForUpdates(fetchImpl = fetch): Promise<UpdateCheckResult> {
-  const currentVersion = packageJson.version ?? "1.0.0";
-  const errors: string[] = [];
-
-  for (const source of RELEASE_SOURCES) {
+export async function checkForUpdates(
+  fetchImpl = fetch,
+  options: UpdateComparisonOptions = {
+    currentVersion: packageJson.version ?? "1.0.0",
+    currentReleaseTag: CURRENT_RELEASE_TAG,
+  },
+): Promise<UpdateCheckResult> {
+  const { currentVersion, currentReleaseTag } = normalizeUpdateOptions(options);
+  const attempts = await Promise.all(RELEASE_SOURCES.map(async (source, priority) => {
     try {
       const response = await fetchImpl(source.apiUrl, {
         headers: { "User-Agent": `orderflow-desktop/${currentVersion}` },
+        signal: AbortSignal.timeout(RELEASE_REQUEST_TIMEOUT_MS),
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -121,16 +137,32 @@ export async function checkForUpdates(fetchImpl = fetch): Promise<UpdateCheckRes
           ...payload,
           html_url: payload.html_url || (latestTag ? source.releaseUrl(latestTag) : ""),
         },
-        { currentVersion, currentReleaseTag: CURRENT_RELEASE_TAG },
+        { currentVersion, currentReleaseTag },
       );
-      if (result.reason !== "missing_asset") {
-        return result;
+      if (result.reason === "missing_asset") {
+        return { error: `${source.name}: ${result.error ?? "未找到更新文件"}` };
       }
-      errors.push(`${source.name}: ${result.error ?? "未找到更新文件"}`);
+      return { candidate: { priority, result, tag: latestTag } };
     } catch (error) {
-      errors.push(`${source.name}: ${error instanceof Error ? error.message : String(error)}`);
+      return { error: `${source.name}: ${error instanceof Error ? error.message : String(error)}` };
     }
+  }));
+
+  const candidates = attempts.flatMap((attempt) => attempt.candidate ? [attempt.candidate] : []);
+  const byNewestThenPriority = (
+    left: (typeof candidates)[number],
+    right: (typeof candidates)[number],
+  ) => compareReleaseTags(right.tag, left.tag) || left.priority - right.priority;
+  const newer = candidates.filter((candidate) => candidate.result.updateAvailable).sort(byNewestThenPriority)[0];
+  if (newer) {
+    return newer.result;
   }
+  const current = candidates.filter((candidate) => candidate.result.reason === "current").sort(byNewestThenPriority)[0];
+  if (current) {
+    return current.result;
+  }
+
+  const errors = attempts.flatMap((attempt) => attempt.error ? [attempt.error] : []);
 
   return {
     updateAvailable: false,
@@ -163,6 +195,12 @@ export async function downloadUpdateExecutable(
     if (update.downloadUrl) {
       assertOfficialDownloadUrl(update.downloadUrl);
       const executable = await fetchUpdateBuffer(update.downloadUrl, currentVersion, fetchImpl);
+      if (update.checksumUrl) {
+        const expectedChecksum = await fetchExpectedChecksum(update.checksumUrl, currentVersion, fetchImpl);
+        if (createHash("sha256").update(executable).digest("hex") !== expectedChecksum) {
+          throw new Error("更新文件校验失败，已拒绝打开。");
+        }
+      }
       await writeFile(tempPath, executable);
     } else {
       await downloadMultipartExecutable(update, tempPath, currentVersion, fetchImpl);
@@ -186,13 +224,17 @@ function normalizeUpdateOptions(options: UpdateComparisonOptions): { currentVers
 }
 
 function selectWindowsAsset(assets: unknown): ReleaseAsset | null {
+  return selectAsset(assets, WINDOWS_ASSET_NAME);
+}
+
+function selectAsset(assets: unknown, expectedName: string): ReleaseAsset | null {
   if (!Array.isArray(assets)) {
     return null;
   }
   return (
     (assets as ReleaseAsset[]).find((asset) => {
       const name = String(asset.name ?? "");
-      return name === WINDOWS_ASSET_NAME;
+      return name === expectedName;
     }) ?? null
   );
 }
@@ -236,12 +278,7 @@ async function downloadMultipartExecutable(
     throw new Error("更新分片顺序不正确，已拒绝下载。");
   }
 
-  assertOfficialDownloadUrl(update.checksumUrl);
-  const checksumPayload = await fetchUpdateBuffer(update.checksumUrl, currentVersion, fetchImpl);
-  const expectedChecksum = checksumPayload.toString("utf8").trim().match(/^([a-f0-9]{64})(?:\s|$)/i)?.[1]?.toLowerCase();
-  if (!expectedChecksum) {
-    throw new Error("更新校验文件无效，已拒绝下载。");
-  }
+  const expectedChecksum = await fetchExpectedChecksum(update.checksumUrl, currentVersion, fetchImpl);
 
   const hash = createHash("sha256");
   for (const [index, part] of parts.entries()) {
@@ -258,6 +295,20 @@ async function downloadMultipartExecutable(
   if (hash.digest("hex") !== expectedChecksum) {
     throw new Error("更新文件校验失败，已拒绝打开。");
   }
+}
+
+async function fetchExpectedChecksum(
+  checksumUrl: string,
+  currentVersion: string,
+  fetchImpl: typeof fetch,
+): Promise<string> {
+  assertOfficialDownloadUrl(checksumUrl);
+  const checksumPayload = await fetchUpdateBuffer(checksumUrl, currentVersion, fetchImpl);
+  const expectedChecksum = checksumPayload.toString("utf8").trim().match(/^([a-f0-9]{64})(?:\s|$)/i)?.[1]?.toLowerCase();
+  if (!expectedChecksum) {
+    throw new Error("更新校验文件无效，已拒绝下载。");
+  }
+  return expectedChecksum;
 }
 
 async function fetchUpdateBuffer(url: string, currentVersion: string, fetchImpl: typeof fetch): Promise<Buffer> {
@@ -283,7 +334,10 @@ function assertOfficialDownloadUrl(value: string): void {
     url.hostname === "gitee.com" &&
     (/^\/wei-dongyu_1_0\/OrderFlow\/releases\/download\//i.test(url.pathname) ||
       /^\/api\/v5\/repos\/wei-dongyu_1_0\/OrderFlow\/releases\/\d+\/attach_files\/\d+\/download$/i.test(url.pathname));
-  if (url.protocol !== "https:" || (!isOfficialGitHub && !isOfficialGitee)) {
+  const isOfficialDownloadServer =
+    url.hostname === "download.ausmet.ai" &&
+    /^\/releases\/[A-Za-z0-9._-]+\/orderflow-desktop-windows\.exe(?:\.sha256)?$/i.test(url.pathname);
+  if (url.protocol !== "https:" || (!isOfficialGitHub && !isOfficialGitee && !isOfficialDownloadServer)) {
     throw new Error("更新文件来自非官方地址，已拒绝下载。");
   }
 }
@@ -353,6 +407,23 @@ function isNewerRelease(
 function parseBuildTag(tag: string): number | null {
   const match = tag.trim().match(/^build-(\d+)$/);
   return match ? Number(match[1]) : null;
+}
+
+function compareReleaseTags(left: string, right: string): number {
+  if (left === right) {
+    return 0;
+  }
+  const leftBuild = parseBuildTag(left);
+  const rightBuild = parseBuildTag(right);
+  if (leftBuild !== null && rightBuild !== null) {
+    return leftBuild - rightBuild;
+  }
+  const leftSemver = parseSemver(left);
+  const rightSemver = parseSemver(right);
+  if (leftSemver && rightSemver) {
+    return compareSemver(leftSemver, rightSemver);
+  }
+  return 0;
 }
 
 function parseSemver(tag: string): [number, number, number] | null {

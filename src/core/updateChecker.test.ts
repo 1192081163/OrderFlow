@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import {
   checkForUpdates,
+  DOWNLOAD_RELEASE_API_URL,
   downloadUpdateExecutable,
   GITEE_RELEASE_API_URL,
   GITHUB_RELEASE_API_URL,
@@ -39,6 +40,33 @@ describe("update checker", () => {
       assetName: WINDOWS_ASSET_NAME,
       downloadUrl: "https://download.example/app.exe",
       reason: "newer_version",
+    });
+  });
+
+  test("uses a checksum asset for direct Windows downloads", () => {
+    const result = updateInfoFromReleasePayload(
+      {
+        tag_name: "build-124",
+        assets: [
+          {
+            name: WINDOWS_ASSET_NAME,
+            browser_download_url:
+              "https://download.ausmet.ai/releases/build-124/orderflow-desktop-windows.exe",
+          },
+          {
+            name: WINDOWS_CHECKSUM_ASSET_NAME,
+            browser_download_url:
+              "https://download.ausmet.ai/releases/build-124/orderflow-desktop-windows.exe.sha256",
+          },
+        ],
+      },
+      { currentVersion: "1.0.0", currentReleaseTag: "build-123" },
+    );
+
+    expect(result).toMatchObject({
+      updateAvailable: true,
+      downloadUrl: "https://download.ausmet.ai/releases/build-124/orderflow-desktop-windows.exe",
+      checksumUrl: "https://download.ausmet.ai/releases/build-124/orderflow-desktop-windows.exe.sha256",
     });
   });
 
@@ -126,32 +154,68 @@ describe("update checker", () => {
     expect(result.error).toContain("network down");
   });
 
-  test("checks Gitee before GitHub", async () => {
+  test("checks every release source and selects the newest valid build", async () => {
     const urls: string[] = [];
     const result = await checkForUpdates(async (url) => {
       urls.push(String(url));
-      return new Response(JSON.stringify({ tag_name: "v1.0.0", assets: [] }), {
+      const sourceUrl = String(url);
+      const tag = sourceUrl === GITHUB_RELEASE_API_URL ? "build-124" : sourceUrl === DOWNLOAD_RELEASE_API_URL ? "build-122" : "build-123";
+      const downloadUrl =
+        sourceUrl === GITHUB_RELEASE_API_URL
+          ? `https://github.com/1192081163/OrderFlow/releases/download/${tag}/${WINDOWS_ASSET_NAME}`
+          : `https://download.ausmet.ai/releases/${tag}/${WINDOWS_ASSET_NAME}`;
+      return new Response(JSON.stringify({
+        tag_name: tag,
+        assets: [{ name: WINDOWS_ASSET_NAME, browser_download_url: downloadUrl }],
+      }), {
         headers: { "Content-Type": "application/json" },
       });
-    });
+    }, { currentVersion: "1.0.0", currentReleaseTag: "build-120" });
 
-    expect(urls).toEqual([GITEE_RELEASE_API_URL]);
-    expect(result.reason).toBe("current");
+    expect(urls).toEqual([DOWNLOAD_RELEASE_API_URL, GITHUB_RELEASE_API_URL, GITEE_RELEASE_API_URL]);
+    expect(result).toMatchObject({
+      updateAvailable: true,
+      latestVersion: "build-124",
+      downloadUrl: `https://github.com/1192081163/OrderFlow/releases/download/build-124/${WINDOWS_ASSET_NAME}`,
+    });
   });
 
-  test("falls back to GitHub when Gitee is unavailable", async () => {
+  test("prefers the download server when sources publish the same newest build", async () => {
     const urls: string[] = [];
     const result = await checkForUpdates(async (url) => {
       urls.push(String(url));
-      if (String(url) === GITEE_RELEASE_API_URL) {
-        return new Response("unavailable", { status: 503 });
-      }
-      return new Response(JSON.stringify({ tag_name: "v1.0.0", assets: [] }), {
+      const sourceUrl = String(url);
+      const tag = sourceUrl === GITEE_RELEASE_API_URL ? "build-123" : "build-124";
+      const origin = sourceUrl === DOWNLOAD_RELEASE_API_URL
+        ? "https://download.ausmet.ai/releases/build-124"
+        : "https://github.com/1192081163/OrderFlow/releases/download/build-124";
+      return new Response(JSON.stringify({
+        tag_name: tag,
+        assets: [{ name: WINDOWS_ASSET_NAME, browser_download_url: `${origin}/${WINDOWS_ASSET_NAME}` }],
+      }), {
         headers: { "Content-Type": "application/json" },
       });
-    });
+    }, { currentVersion: "1.0.0", currentReleaseTag: "build-120" });
 
-    expect(urls).toEqual([GITEE_RELEASE_API_URL, GITHUB_RELEASE_API_URL]);
+    expect(urls).toEqual([DOWNLOAD_RELEASE_API_URL, GITHUB_RELEASE_API_URL, GITEE_RELEASE_API_URL]);
+    expect(result.downloadUrl).toBe(
+      `https://download.ausmet.ai/releases/build-124/${WINDOWS_ASSET_NAME}`,
+    );
+  });
+
+  test("falls back when the download server is unavailable", async () => {
+    const urls: string[] = [];
+    const result = await checkForUpdates(async (url) => {
+      urls.push(String(url));
+      if (String(url) === DOWNLOAD_RELEASE_API_URL) {
+        return new Response("unavailable", { status: 503 });
+      }
+      return new Response(JSON.stringify({ tag_name: "build-123", assets: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }, { currentVersion: "1.0.0", currentReleaseTag: "build-123" });
+
+    expect(urls).toEqual([DOWNLOAD_RELEASE_API_URL, GITHUB_RELEASE_API_URL, GITEE_RELEASE_API_URL]);
     expect(result.reason).toBe("current");
   });
 
@@ -205,6 +269,56 @@ describe("update checker", () => {
     );
 
     expect(await readFile(executablePath, "utf8")).toBe("gitee executable");
+  });
+
+  test("downloads and verifies a direct update from the AUSMET download server", async () => {
+    const downloadDir = await mkdtemp(path.join(os.tmpdir(), "orderflow-update-"));
+    tempDirs.push(downloadDir);
+    const executable = Buffer.from("verified executable");
+    const checksum = createHash("sha256").update(executable).digest("hex");
+    const baseUrl = "https://download.ausmet.ai/releases/build-124";
+    const downloadUrl = `${baseUrl}/${WINDOWS_ASSET_NAME}`;
+    const checksumUrl = `${baseUrl}/${WINDOWS_CHECKSUM_ASSET_NAME}`;
+
+    const executablePath = await downloadUpdateExecutable(
+      {
+        updateAvailable: true,
+        currentVersion: "1.0.0",
+        latestVersion: "build-124",
+        assetName: WINDOWS_ASSET_NAME,
+        downloadUrl,
+        checksumUrl,
+        reason: "newer_version",
+      },
+      downloadDir,
+      async (url) =>
+        new Response(String(url) === checksumUrl ? `${checksum}  ${WINDOWS_ASSET_NAME}\n` : executable),
+    );
+
+    expect(await readFile(executablePath)).toEqual(executable);
+  });
+
+  test("rejects a direct AUSMET download when its checksum does not match", async () => {
+    const downloadDir = await mkdtemp(path.join(os.tmpdir(), "orderflow-update-"));
+    tempDirs.push(downloadDir);
+    const baseUrl = "https://download.ausmet.ai/releases/build-124";
+
+    await expect(downloadUpdateExecutable(
+      {
+        updateAvailable: true,
+        currentVersion: "1.0.0",
+        latestVersion: "build-124",
+        assetName: WINDOWS_ASSET_NAME,
+        downloadUrl: `${baseUrl}/${WINDOWS_ASSET_NAME}`,
+        checksumUrl: `${baseUrl}/${WINDOWS_CHECKSUM_ASSET_NAME}`,
+        reason: "newer_version",
+      },
+      downloadDir,
+      async (url) => new Response(String(url).endsWith(".sha256") ? `${"0".repeat(64)}  ${WINDOWS_ASSET_NAME}\n` : "tampered"),
+    )).rejects.toThrow("校验失败");
+
+    await expect(access(path.join(downloadDir, WINDOWS_ASSET_NAME))).rejects.toBeTruthy();
+    await expect(access(path.join(downloadDir, `${WINDOWS_ASSET_NAME}.download`))).rejects.toBeTruthy();
   });
 
   test("downloads, joins, and verifies multipart Gitee updates", async () => {

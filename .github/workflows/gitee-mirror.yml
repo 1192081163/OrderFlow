@@ -1,0 +1,83 @@
+name: Mirror Gitee Release
+
+"on":
+  workflow_run:
+    workflows:
+      - Build Release
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: gitee-release-mirror
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ASSET_BASENAME: orderflow-desktop
+
+jobs:
+  publish-gitee-release:
+    name: Mirror Source and Publish Gitee Release
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    env:
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      GITEE_USERNAME: wei-dongyu_1_0
+      GITEE_REPOSITORY: wei-dongyu_1_0/OrderFlow
+      GIT_TERMINAL_PROMPT: 0
+    steps:
+      - name: Checkout released source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Require Gitee release credentials
+        shell: bash
+        run: test -n "$GITEE_TOKEN"
+
+      - name: Mirror source and tags to Gitee
+        shell: bash
+        run: |
+          git remote add gitee "https://${GITEE_USERNAME}:${GITEE_TOKEN}@gitee.com/${GITEE_REPOSITORY}.git"
+          pushed=false
+          for attempt in 1 2 3; do
+            if timeout 180s git -c http.version=HTTP/1.1 push gitee HEAD:main --tags --force; then
+              pushed=true
+              break
+            fi
+            echo "Gitee mirror attempt ${attempt} failed; retrying..." >&2
+          done
+          git remote remove gitee
+          test "$pushed" = true
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.ASSET_BASENAME }}-windows.exe
+          path: release-assets
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Publish Gitee Windows release
+        shell: bash
+        env:
+          GITEE_TAG: build-${{ github.event.workflow_run.run_number }}
+          GITEE_TARGET: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          mkdir -p release-assets/gitee
+          split --bytes=4M --numeric-suffixes=0 --suffix-length=2 \
+            release-assets/orderflow-desktop-windows.exe \
+            release-assets/gitee/orderflow-desktop-windows.exe.part-
+          sha256sum release-assets/orderflow-desktop-windows.exe \
+            | awk '{print $1 "  orderflow-desktop-windows.exe"}' \
+            > release-assets/gitee/orderflow-desktop-windows.exe.sha256
+          bash ./scripts/publish-gitee-release.sh release-assets/gitee/*

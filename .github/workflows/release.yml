@@ -227,6 +227,13 @@ jobs:
           name: ${{ env.ASSET_BASENAME }}-mac.dmg
           path: release-assets
 
+      - name: Generate release checksums
+        shell: bash
+        run: |
+          cd release-assets
+          sha256sum "${{ env.ASSET_BASENAME }}-windows.exe" > "${{ env.ASSET_BASENAME }}-windows.exe.sha256"
+          sha256sum "${{ env.ASSET_BASENAME }}-mac.dmg" > "${{ env.ASSET_BASENAME }}-mac.dmg.sha256"
+
       - name: Publish direct download release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -235,47 +242,25 @@ jobs:
           tag="build-${GITHUB_RUN_NUMBER}"
           gh release create "$tag" \
             "release-assets/${{ env.ASSET_BASENAME }}-windows.exe#${{ env.ASSET_BASENAME }}-windows.exe" \
+            "release-assets/${{ env.ASSET_BASENAME }}-windows.exe.sha256#${{ env.ASSET_BASENAME }}-windows.exe.sha256" \
             "release-assets/${{ env.ASSET_BASENAME }}-mac.dmg#${{ env.ASSET_BASENAME }}-mac.dmg" \
+            "release-assets/${{ env.ASSET_BASENAME }}-mac.dmg.sha256#${{ env.ASSET_BASENAME }}-mac.dmg.sha256" \
             --title "订单整理助手 ${tag}" \
             --notes "Windows 便携版和 macOS DMG 已自动生成。Windows 下载 orderflow-desktop-windows.exe；Mac 下载 orderflow-desktop-mac.dmg。" \
             --target "$GITHUB_SHA" \
             --latest
 
-  publish-gitee-release:
-    name: Mirror Source and Publish Gitee Release
+  publish-download-server:
+    name: Publish AUSMET Download
     runs-on: ubuntu-latest
     needs:
-      - publish-release
+      - test
+      - build-windows
+      - build-macos
     if: github.ref == 'refs/heads/main'
-    env:
-      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-      GITEE_USERNAME: wei-dongyu_1_0
-      GITEE_REPOSITORY: wei-dongyu_1_0/OrderFlow
-      GIT_TERMINAL_PROMPT: 0
     steps:
-      - name: Checkout full history
+      - name: Checkout
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Require Gitee release credentials
-        shell: bash
-        run: test -n "$GITEE_TOKEN"
-
-      - name: Mirror source and tags to Gitee
-        shell: bash
-        run: |
-          git remote add gitee "https://${GITEE_USERNAME}:${GITEE_TOKEN}@gitee.com/${GITEE_REPOSITORY}.git"
-          pushed=false
-          for attempt in 1 2 3; do
-            if timeout 180s git -c http.version=HTTP/1.1 push gitee HEAD:main --tags --force; then
-              pushed=true
-              break
-            fi
-            echo "Gitee mirror attempt ${attempt} failed; retrying..." >&2
-          done
-          git remote remove gitee
-          test "$pushed" = true
 
       - name: Download Windows artifact
         uses: actions/download-artifact@v8
@@ -283,17 +268,34 @@ jobs:
           name: ${{ env.ASSET_BASENAME }}-windows.exe
           path: release-assets
 
-      - name: Publish Gitee Windows release
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.ASSET_BASENAME }}-mac.dmg
+          path: release-assets
+
+      - name: Configure download server SSH
         shell: bash
         env:
-          GITEE_TAG: build-${{ github.run_number }}
-          GITEE_TARGET: ${{ github.sha }}
+          DOWNLOAD_SSH_PRIVATE_KEY: ${{ secrets.DOWNLOAD_SSH_PRIVATE_KEY }}
+          DOWNLOAD_SSH_KNOWN_HOSTS: ${{ secrets.DOWNLOAD_SSH_KNOWN_HOSTS }}
         run: |
-          mkdir -p release-assets/gitee
-          split --bytes=4M --numeric-suffixes=0 --suffix-length=2 \
+          test -n "$DOWNLOAD_SSH_PRIVATE_KEY"
+          test -n "$DOWNLOAD_SSH_KNOWN_HOSTS"
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$DOWNLOAD_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DOWNLOAD_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      - name: Publish direct AUSMET downloads
+        shell: bash
+        env:
+          DOWNLOAD_SSH_HOST: download.ausmet.ai
+          DOWNLOAD_SSH_USER: orderflow-deploy
+          DOWNLOAD_TAG: build-${{ github.run_number }}
+          DOWNLOAD_BASE_URL: https://download.ausmet.ai
+          DOWNLOAD_REMOTE_ROOT: /srv/orderflow-download/public
+        run: |
+          bash ./scripts/publish-download-server.sh \
             release-assets/orderflow-desktop-windows.exe \
-            release-assets/gitee/orderflow-desktop-windows.exe.part-
-          sha256sum release-assets/orderflow-desktop-windows.exe \
-            | awk '{print $1 "  orderflow-desktop-windows.exe"}' \
-            > release-assets/gitee/orderflow-desktop-windows.exe.sha256
-          bash ./scripts/publish-gitee-release.sh release-assets/gitee/*
+            release-assets/orderflow-desktop-mac.dmg
