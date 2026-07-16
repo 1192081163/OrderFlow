@@ -21,8 +21,6 @@ export async function isOrderWorkbookContent(
     const extractor = dependencies.runOrderExtraction ?? runPythonOrderExtraction;
     const result = await extractor([filePath], { inferManual: true });
     return result.rows.length > 0;
-  } catch {
-    return false;
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

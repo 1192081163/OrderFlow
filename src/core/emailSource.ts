@@ -151,8 +151,11 @@ export async function listRecentEmailMessages(
   try {
     const lock = await client.getMailboxLock("INBOX");
     try {
-      for await (const message of client.fetch({ since: cutoff }, { envelope: true, bodyStructure: true, uid: true })) {
-        if (!isMessageWithinFetchWindow(message.envelope?.date, cutoff)) {
+      for await (const message of client.fetch(
+        { since: cutoff },
+        { envelope: true, bodyStructure: true, internalDate: true, uid: true },
+      )) {
+        if (!isMessageWithinFetchWindow(fetchedMessageDate(message), cutoff)) {
           continue;
         }
 
@@ -207,18 +210,23 @@ async function listRecentOrderEmailMessagesOnce(
   try {
     const lock = await client.getMailboxLock("INBOX");
     try {
-      for await (const message of client.fetch({ since: cutoff }, { envelope: true, bodyStructure: true, uid: true })) {
-        if (!isMessageWithinFetchWindow(message.envelope?.date, cutoff)) {
+      for await (const message of client.fetch(
+        { since: cutoff },
+        { envelope: true, bodyStructure: true, internalDate: true, uid: true },
+      )) {
+        if (!isMessageWithinFetchWindow(fetchedMessageDate(message), cutoff)) {
           continue;
         }
         scannedMessages += 1;
         const summary = summarizeFetchedEmailMetadata(message);
-        scannedUids.push(summary.uid);
-        if (!summary.hasExcelAttachments || excluded.has(summary.uid)) {
+        if (excluded.has(summary.uid)) {
+          continue;
+        }
+        if (!summary.hasExcelAttachments) {
+          scannedUids.push(summary.uid);
           continue;
         }
         const parts = findExcelAttachmentParts(message.bodyStructure);
-        candidateCount += parts.length;
         candidates.push({ summary, parts });
       }
 
@@ -228,17 +236,21 @@ async function listRecentOrderEmailMessagesOnce(
           candidate.parts.map((part) => part.part),
           { uid: true },
         );
+        const downloadedParts = candidate.parts.map((part) => ({ part, downloadedPart: downloaded[part.part] }));
+        if (downloadedParts.some(({ downloadedPart }) => !downloadedPart?.content)) {
+          continue;
+        }
+
         const names: string[] = [];
-        for (const part of candidate.parts) {
-          const downloadedPart = downloaded[part.part];
-          if (!downloadedPart?.content) {
-            continue;
-          }
+        candidateCount += candidate.parts.length;
+        for (const { part, downloadedPart } of downloadedParts) {
+          if (!downloadedPart?.content) continue;
           const filename = downloadedPart.meta?.filename || part.filename;
           if (await isOrderEmailAttachment({ filename, content: toBuffer(downloadedPart.content) })) {
             names.push(filename);
           }
         }
+        scannedUids.push(candidate.summary.uid);
         if (names.length > 0) {
           messages.push({
             ...candidate.summary,
@@ -521,11 +533,22 @@ function summarizeFetchedEmailMetadata(message: FetchMessageObject): EmailMessag
     uid: String(message.uid ?? ""),
     subject: normalizeMailText(message.envelope?.subject) || "(无主题)",
     from: formatEnvelopeAddresses(message.envelope?.from),
-    date: normalizeEnvelopeDate(message.envelope?.date),
+    date: normalizeEnvelopeDate(fetchedMessageDate(message)),
     attachmentCount: attachmentNames.length,
     excelAttachmentNames: attachmentNames,
     hasExcelAttachments: attachmentNames.length > 0,
   };
+}
+
+function fetchedMessageDate(message: FetchMessageObject): Date | undefined {
+  if (message.internalDate instanceof Date && Number.isFinite(message.internalDate.getTime())) {
+    return message.internalDate;
+  }
+  if (typeof message.internalDate === "string") {
+    const parsed = new Date(message.internalDate);
+    if (Number.isFinite(parsed.getTime())) return parsed;
+  }
+  return message.envelope?.date;
 }
 
 function findExcelAttachmentParts(

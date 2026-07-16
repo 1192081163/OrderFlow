@@ -1,6 +1,7 @@
 import { mkdtemp, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { mailboxIdFor, openLocalMailStore, type LocalMailStore } from "./localMailStore.js";
@@ -65,6 +66,33 @@ describe("local mail SQLite store", () => {
 
     expect(store.listMessages("orders@example.com")).toEqual([]);
     expect((await readdir(root)).some((name) => name.startsWith("mail-cache.sqlite.corrupt-"))).toBe(true);
+  });
+
+  test("clears legacy seen-only UIDs once so previously missed orders are rechecked", async () => {
+    const { databasePath } = await tempDatabase();
+    const legacy = new DatabaseSync(databasePath);
+    legacy.exec(`
+      CREATE TABLE mail_seen_uids (
+        mailbox_id TEXT NOT NULL,
+        uid TEXT NOT NULL,
+        seen_at TEXT NOT NULL,
+        PRIMARY KEY (mailbox_id, uid)
+      );
+    `);
+    legacy.prepare("INSERT INTO mail_seen_uids(mailbox_id,uid,seen_at) VALUES(?,?,?)").run(
+      mailboxIdFor("orders@example.com"),
+      "101",
+      "2026-07-13T01:00:00Z",
+    );
+    legacy.close();
+
+    store = await openLocalMailStore({ databasePath, now: () => Date.parse("2026-07-16T01:00:00Z") });
+    expect(store.knownUids("orders@example.com")).toEqual([]);
+    store.syncMessages("orders@example.com", scan([], ["102"]));
+    store.close();
+
+    store = await openLocalMailStore({ databasePath, now: () => Date.parse("2026-07-16T01:01:00Z") });
+    expect(store.knownUids("orders@example.com")).toEqual(["102"]);
   });
 });
 

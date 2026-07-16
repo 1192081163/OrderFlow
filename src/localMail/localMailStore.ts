@@ -81,6 +81,7 @@ class SqliteLocalMailStore implements LocalMailStore {
       CREATE INDEX IF NOT EXISTS mail_messages_received_idx ON mail_messages(received_at DESC);
       CREATE INDEX IF NOT EXISTS mail_seen_uids_seen_idx ON mail_seen_uids(seen_at);
     `);
+    this.migrateLegacySeenUidCache();
   }
 
   journalMode(): string {
@@ -195,6 +196,20 @@ class SqliteLocalMailStore implements LocalMailStore {
 
   close(): void {
     this.db.close();
+  }
+
+  private migrateLegacySeenUidCache(): void {
+    const row = this.db.prepare("PRAGMA user_version").get() as unknown as { user_version?: unknown } | undefined;
+    const version = Number(row?.user_version ?? 0);
+    if (version >= 1) return;
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.exec("DELETE FROM mail_seen_uids; PRAGMA user_version = 1; COMMIT;");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   private rows(sql: string, email: string): LocalMailMessageSummary[] {

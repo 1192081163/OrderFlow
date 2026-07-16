@@ -322,7 +322,7 @@ describe("email IMAP scanning", () => {
     expect(imapMock.instances[0]?.fetchCalls).toEqual([
       {
         range: { since: new Date("2026-06-11T00:00:00.000Z") },
-        query: { envelope: true, bodyStructure: true, uid: true },
+        query: { envelope: true, bodyStructure: true, internalDate: true, uid: true },
         options: undefined,
       },
     ]);
@@ -436,13 +436,52 @@ describe("email IMAP scanning", () => {
     });
 
     expect(result.messages.map((item) => item.uid)).toEqual(["102"]);
-    expect(result.scannedUids).toEqual(["101", "102", "103"]);
+    expect(result.scannedUids).toEqual(["102", "103"]);
     expect(result.messages[0]?.excelAttachmentNames).toEqual(["order.xlsx"]);
     expect(imapMock.instances).toHaveLength(1);
     expect(imapMock.instances[0]).toMatchObject({ connectCalls: 1, logoutCalls: 1 });
     const downloadCalls = imapMock.instances.flatMap((instance) => instance.downloadManyCalls.map((call) => call.range));
     expect(downloadCalls).toEqual(["102", "103"]);
     expect(result.nonOrderExcelAttachmentCount).toBe(1);
+  });
+
+  test("leaves candidates with incomplete downloads unscanned so the next refresh retries them", async () => {
+    imapMock.messages = [
+      makeMetadataMessage({ uid: 105, subject: "PO 105", date: new Date("2026-06-17T05:00:00Z"), attachments: ["order.xlsx"] }),
+    ];
+    imapMock.downloads = { "105": {} };
+
+    const result = await listRecentOrderEmailMessages(testImapConfig(), {
+      days: 7,
+      now: new Date("2026-06-18T00:00:00Z"),
+    });
+
+    expect(result.messages).toEqual([]);
+    expect(result.scannedUids).toEqual([]);
+    expect(result.nonOrderExcelAttachmentCount).toBe(0);
+  });
+
+  test("uses the IMAP receipt date instead of the sender date for the scan window and day", async () => {
+    imapMock.messages = [
+      makeMetadataMessage({
+        uid: 106,
+        subject: "PO 106",
+        date: new Date("2026-06-01T05:00:00Z"),
+        internalDate: new Date("2026-06-17T05:00:00Z"),
+        attachments: ["order.xlsx"],
+      }),
+    ];
+    imapMock.downloads = {
+      "106": { "1": { content: await makeOrderWorkbookBuffer(), meta: { filename: "order.xlsx" } } },
+    };
+
+    const result = await listRecentOrderEmailMessages(testImapConfig(), {
+      days: 7,
+      now: new Date("2026-06-18T00:00:00Z"),
+    });
+
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.date).toBe("2026-06-17T05:00:00.000Z");
   });
 
   test("rejects order-looking candidates larger than 25 MB before classification", async () => {
@@ -501,15 +540,18 @@ function makeMetadataMessage({
   uid,
   subject,
   date,
+  internalDate,
   attachments,
 }: {
   uid: number;
   subject: string;
   date: Date;
+  internalDate?: Date;
   attachments: string[];
 }): unknown {
   const message = {
     uid,
+    ...(internalDate ? { internalDate } : {}),
     envelope: {
       subject,
       date,

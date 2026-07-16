@@ -64,4 +64,17 @@ describe("order workbook classifier", () => {
 
     expect(isOrder).toBe(false);
   });
+
+  test("propagates classifier infrastructure failures so email scans can retry", async () => {
+    let tempWorkbookPath = "";
+    const result = isOrderWorkbookContent("order.xlsx", Buffer.from("workbook"), {
+      runOrderExtraction: async (paths) => {
+        tempWorkbookPath = paths[0] ?? "";
+        throw new Error("Python runner unavailable");
+      },
+    });
+
+    await expect(result).rejects.toThrow("Python runner unavailable");
+    await expect(stat(tempWorkbookPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });
