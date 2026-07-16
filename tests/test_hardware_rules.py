@@ -138,7 +138,7 @@ def test_door_skin_main_sheet_splits_skin_and_commercial_profile_rows(tmp_path: 
     assert row.values[10:14] == [6, "COMMERCIAL", 4, "DS"]
 
 
-def test_profileless_main_sheet_keeps_concealed_rows_separate(tmp_path: Path) -> None:
+def test_profileless_main_sheet_counts_concealed_rows_as_commercial(tmp_path: Path) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "Main Sheet"
@@ -171,10 +171,10 @@ def test_profileless_main_sheet_keeps_concealed_rows_separate(tmp_path: Path) ->
 
     row = extract.extract_workbook(save_workbook(wb, tmp_path / "concealed-main-sheet.xlsx"), infer_manual=True)
 
-    assert row.values[10:14] == [2, "COMMERCIAL", 1, "CONCEALED"]
+    assert row.values[10:14] == [3, "COMMERCIAL", None, None]
 
 
-def test_standard_worksheet_splits_concealed_cavity_slider_rows(tmp_path: Path) -> None:
+def test_standard_worksheet_counts_concealed_frames_as_commercial_but_keeps_cavity_sliders(tmp_path: Path) -> None:
     wb = worksheet_book()
     ws = wb["Worksheet"]
     for row_idx, values in {
@@ -186,7 +186,7 @@ def test_standard_worksheet_splits_concealed_cavity_slider_rows(tmp_path: Path) 
 
     row = extract.extract_workbook(save_workbook(wb, tmp_path / "concealed-cavity.xlsx"), infer_manual=True)
 
-    assert row.values[10:14] == [2, "CONCEALED", 1, "CS"]
+    assert row.values[10:14] == [2, "COMMERCIAL", 1, "CS"]
 
 
 def test_standard_worksheet_keeps_bauhaus_as_goods_type(tmp_path: Path) -> None:

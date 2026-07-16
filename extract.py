@@ -942,6 +942,8 @@ def classify_goods(profile: Any, row: ExtractedRow | None = None) -> str | None:
         return "Bauhaus"
     if "CAVITY" in upper or "SLIDER" in upper:
         return "CS"
+    if "CONCEALED" in upper:
+        return "COMMERCIAL"
     if "SERVICE PART" in upper:
         return "PART"
     if "DYNA" in upper:
@@ -1023,7 +1025,7 @@ def classify_goods_with_context(profile: Any, context: str, row: ExtractedRow | 
         return "CS"
 
     if "CONCEALED" in context_upper:
-        return "CONCEALED"
+        return "COMMERCIAL"
 
     if re.match(r"^(LN|BL)-", upper):
         return "COMMERCIAL"
@@ -2529,7 +2531,7 @@ def extract_profile_tables(ws: Any, row: ExtractedRow, infer_manual: bool = Fals
                 or classify_goods_with_context(profile, context, row)
             )
             goods = goods or door_skin_capping_only_goods(row, context, table_has_flat_sheet)
-            if ws.title == "Main Sheet" and not is_cavity_table and goods != "CONCEALED":
+            if ws.title == "Main Sheet" and not is_cavity_table:
                 goods = "COMMERCIAL"
             if is_cavity_table and goods in {None, "MODERN", "DELUXE"}:
                 goods = "CS"
