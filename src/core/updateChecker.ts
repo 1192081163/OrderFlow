@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, appendFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -11,12 +11,10 @@ const packageJson = require("../../package.json") as { version?: string };
 
 export const DOWNLOAD_RELEASE_API_URL = "https://download.ausmet.ai/latest.json";
 export const GITHUB_RELEASE_API_URL = "https://api.github.com/repos/1192081163/OrderFlow/releases/latest";
-export const GITEE_RELEASE_API_URL = "https://gitee.com/api/v5/repos/wei-dongyu_1_0/OrderFlow/releases/latest";
 export const RELEASE_API_URL = DOWNLOAD_RELEASE_API_URL;
-export const RELEASE_API_URLS = [DOWNLOAD_RELEASE_API_URL, GITHUB_RELEASE_API_URL, GITEE_RELEASE_API_URL] as const;
+export const RELEASE_API_URLS = [DOWNLOAD_RELEASE_API_URL, GITHUB_RELEASE_API_URL] as const;
 export const WINDOWS_ASSET_NAME = "orderflow-desktop-windows.exe";
 export const WINDOWS_CHECKSUM_ASSET_NAME = `${WINDOWS_ASSET_NAME}.sha256`;
-export const WINDOWS_PART_ASSET_PREFIX = `${WINDOWS_ASSET_NAME}.part-`;
 const RELEASE_REQUEST_TIMEOUT_MS = 10_000;
 
 const RELEASE_SOURCES = [
@@ -29,11 +27,6 @@ const RELEASE_SOURCES = [
     name: "GitHub",
     apiUrl: GITHUB_RELEASE_API_URL,
     releaseUrl: (tag: string) => `https://github.com/1192081163/OrderFlow/releases/tag/${encodeURIComponent(tag)}`,
-  },
-  {
-    name: "Gitee",
-    apiUrl: GITEE_RELEASE_API_URL,
-    releaseUrl: (tag: string) => `https://gitee.com/wei-dongyu_1_0/OrderFlow/releases/tag/${encodeURIComponent(tag)}`,
   },
 ] as const;
 
@@ -68,7 +61,6 @@ export function updateInfoFromReleasePayload(
   const releaseUrl = String(payload.html_url ?? "");
   const asset = selectWindowsAsset(payload.assets);
   const checksum = asset ? selectAsset(payload.assets, WINDOWS_CHECKSUM_ASSET_NAME) : null;
-  const multipart = asset ? null : selectWindowsMultipart(payload.assets);
 
   if (!isNewerRelease(latestTag, latestVersion, currentReleaseTag, currentVersion)) {
     return {
@@ -80,7 +72,7 @@ export function updateInfoFromReleasePayload(
     };
   }
 
-  if (!asset && !multipart) {
+  if (!asset) {
     return {
       updateAvailable: false,
       currentVersion,
@@ -96,19 +88,9 @@ export function updateInfoFromReleasePayload(
     currentVersion,
     latestVersion,
     releaseUrl,
-    assetName: asset ? String(asset.name ?? "") : WINDOWS_ASSET_NAME,
-    ...(asset
-      ? {
-          downloadUrl: String(asset.browser_download_url ?? releaseUrl),
-          ...(checksum ? { checksumUrl: String(checksum.browser_download_url ?? "") } : {}),
-        }
-      : {
-          downloadParts: multipart?.parts.map((part) => ({
-            assetName: String(part.name ?? ""),
-            downloadUrl: String(part.browser_download_url ?? ""),
-          })),
-          checksumUrl: String(multipart?.checksum.browser_download_url ?? ""),
-        }),
+    assetName: String(asset.name ?? ""),
+    downloadUrl: String(asset.browser_download_url ?? releaseUrl),
+    ...(checksum ? { checksumUrl: String(checksum.browser_download_url ?? "") } : {}),
     reason: "newer_version",
   };
 }
@@ -177,9 +159,7 @@ export async function downloadUpdateExecutable(
   downloadDir: string,
   fetchImpl = fetch,
 ): Promise<string> {
-  const hasDirectDownload = Boolean(update.downloadUrl);
-  const hasMultipartDownload = Boolean(update.downloadParts?.length && update.checksumUrl);
-  if (!update.updateAvailable || !update.assetName || (!hasDirectDownload && !hasMultipartDownload)) {
+  if (!update.updateAvailable || !update.assetName || !update.downloadUrl) {
     throw new Error("更新文件不存在，请稍后重试或手动下载新版 exe。");
   }
   if (update.assetName !== WINDOWS_ASSET_NAME) {
@@ -192,19 +172,15 @@ export async function downloadUpdateExecutable(
   const currentVersion = packageJson.version ?? "1.0.0";
 
   try {
-    if (update.downloadUrl) {
-      assertOfficialDownloadUrl(update.downloadUrl);
-      const executable = await fetchUpdateBuffer(update.downloadUrl, currentVersion, fetchImpl);
-      if (update.checksumUrl) {
-        const expectedChecksum = await fetchExpectedChecksum(update.checksumUrl, currentVersion, fetchImpl);
-        if (createHash("sha256").update(executable).digest("hex") !== expectedChecksum) {
-          throw new Error("更新文件校验失败，已拒绝打开。");
-        }
+    assertOfficialDownloadUrl(update.downloadUrl);
+    const executable = await fetchUpdateBuffer(update.downloadUrl, currentVersion, fetchImpl);
+    if (update.checksumUrl) {
+      const expectedChecksum = await fetchExpectedChecksum(update.checksumUrl, currentVersion, fetchImpl);
+      if (createHash("sha256").update(executable).digest("hex") !== expectedChecksum) {
+        throw new Error("更新文件校验失败，已拒绝打开。");
       }
-      await writeFile(tempPath, executable);
-    } else {
-      await downloadMultipartExecutable(update, tempPath, currentVersion, fetchImpl);
     }
+    await writeFile(tempPath, executable);
     await rename(tempPath, executablePath);
   } finally {
     await rm(tempPath, { force: true });
@@ -237,64 +213,6 @@ function selectAsset(assets: unknown, expectedName: string): ReleaseAsset | null
       return name === expectedName;
     }) ?? null
   );
-}
-
-function selectWindowsMultipart(assets: unknown): { parts: ReleaseAsset[]; checksum: ReleaseAsset } | null {
-  if (!Array.isArray(assets)) {
-    return null;
-  }
-  const releaseAssets = assets as ReleaseAsset[];
-  const parts = releaseAssets
-    .filter((asset) => String(asset.name ?? "").startsWith(WINDOWS_PART_ASSET_PREFIX))
-    .sort((left, right) => String(left.name ?? "").localeCompare(String(right.name ?? "")));
-  const checksum = releaseAssets.find((asset) => String(asset.name ?? "") === WINDOWS_CHECKSUM_ASSET_NAME);
-  const partsAreComplete =
-    parts.length >= 2 &&
-    parts.every(
-      (part, index) =>
-        String(part.name ?? "") === `${WINDOWS_PART_ASSET_PREFIX}${String(index).padStart(2, "0")}` &&
-        Boolean(String(part.browser_download_url ?? "")),
-    );
-  if (!checksum || !String(checksum.browser_download_url ?? "") || !partsAreComplete) {
-    return null;
-  }
-  return { parts, checksum };
-}
-
-async function downloadMultipartExecutable(
-  update: UpdateCheckResult,
-  tempPath: string,
-  currentVersion: string,
-  fetchImpl: typeof fetch,
-): Promise<void> {
-  const parts = update.downloadParts ?? [];
-  if (!update.checksumUrl || parts.length < 2) {
-    throw new Error("更新分片不完整，请稍后重试或手动下载新版 exe。");
-  }
-  const partsAreComplete = parts.every(
-    (part, index) => part.assetName === `${WINDOWS_PART_ASSET_PREFIX}${String(index).padStart(2, "0")}`,
-  );
-  if (!partsAreComplete) {
-    throw new Error("更新分片顺序不正确，已拒绝下载。");
-  }
-
-  const expectedChecksum = await fetchExpectedChecksum(update.checksumUrl, currentVersion, fetchImpl);
-
-  const hash = createHash("sha256");
-  for (const [index, part] of parts.entries()) {
-    assertOfficialDownloadUrl(part.downloadUrl);
-    const content = await fetchUpdateBuffer(part.downloadUrl, currentVersion, fetchImpl);
-    hash.update(content);
-    if (index === 0) {
-      await writeFile(tempPath, content);
-    } else {
-      await appendFile(tempPath, content);
-    }
-  }
-
-  if (hash.digest("hex") !== expectedChecksum) {
-    throw new Error("更新文件校验失败，已拒绝打开。");
-  }
 }
 
 async function fetchExpectedChecksum(
@@ -330,14 +248,10 @@ function assertOfficialDownloadUrl(value: string): void {
   }
   const isOfficialGitHub =
     url.hostname === "github.com" && /^\/1192081163\/(?:orderflow-desktop|OrderFlow)\/releases\/download\//i.test(url.pathname);
-  const isOfficialGitee =
-    url.hostname === "gitee.com" &&
-    (/^\/wei-dongyu_1_0\/OrderFlow\/releases\/download\//i.test(url.pathname) ||
-      /^\/api\/v5\/repos\/wei-dongyu_1_0\/OrderFlow\/releases\/\d+\/attach_files\/\d+\/download$/i.test(url.pathname));
   const isOfficialDownloadServer =
     url.hostname === "download.ausmet.ai" &&
     /^\/releases\/[A-Za-z0-9._-]+\/orderflow-desktop-windows\.exe(?:\.sha256)?$/i.test(url.pathname);
-  if (url.protocol !== "https:" || (!isOfficialGitHub && !isOfficialGitee && !isOfficialDownloadServer)) {
+  if (url.protocol !== "https:" || (!isOfficialGitHub && !isOfficialDownloadServer)) {
     throw new Error("更新文件来自非官方地址，已拒绝下载。");
   }
 }

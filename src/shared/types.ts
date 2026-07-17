@@ -73,7 +73,6 @@ export interface UpdateCheckResult {
   latestVersion?: string;
   releaseUrl?: string;
   downloadUrl?: string;
-  downloadParts?: Array<{ assetName: string; downloadUrl: string }>;
   checksumUrl?: string;
   assetName?: string;
   reason: "current" | "newer_version" | "missing_asset" | "error";

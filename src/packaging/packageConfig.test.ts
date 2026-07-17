@@ -104,7 +104,6 @@ describe("Electron packaging configuration", () => {
 
   test("release workflow builds Windows and macOS Electron artifacts", async () => {
     const workflow = await readFile(path.join(root, ".github/workflows/release.yml"), "utf8");
-    const giteeWorkflow = await readFile(path.join(root, ".github/workflows/gitee-mirror.yml"), "utf8");
 
     expect(workflow).toContain("branches:");
     expect(workflow).toContain("- main");
@@ -148,8 +147,6 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("build-macos:");
     expect(workflow).toContain("runs-on: macos-latest");
     expect(workflow).toContain("orderflow-desktop-windows.exe");
-    expect(workflow).toContain("Enforce Gitee 100 MB asset limit");
-    expect(workflow).toContain("100MB");
     expect(workflow).toContain("orderflow-desktop-mac.dmg");
     expect(workflow.match(/compression-level: 0/g)).toHaveLength(2);
     expect(workflow).not.toContain("--win nsis");
@@ -170,31 +167,12 @@ describe("Electron packaging configuration", () => {
     expect(workflow).toContain("DOWNLOAD_SSH_KNOWN_HOSTS: ${{ secrets.DOWNLOAD_SSH_KNOWN_HOSTS }}");
     expect(workflow).toContain("download.ausmet.ai");
     expect(workflow).toContain("scripts/publish-download-server.sh");
-    expect(workflow).not.toContain("publish-gitee-release:");
+    expect(workflow.toLowerCase()).not.toContain("gitee");
     expect(workflow).not.toContain("requirements-desktop.txt");
-
-    expect(giteeWorkflow).toContain("workflow_run:");
-    expect(giteeWorkflow).toContain("workflows:\n      - Build Release");
-    expect(giteeWorkflow).toContain("github.event.workflow_run.conclusion == 'success'");
-    expect(giteeWorkflow).toContain("github.event.workflow_run.head_branch == 'main'");
-    expect(giteeWorkflow).toContain("publish-gitee-release:");
-    expect(giteeWorkflow).toContain("GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}");
-    expect(giteeWorkflow).toContain("git -c http.version=HTTP/1.1 push gitee HEAD:main --tags --force");
-    expect(giteeWorkflow).toContain("timeout 180s");
-    expect(giteeWorkflow).toContain("run-id: ${{ github.event.workflow_run.id }}");
-    expect(giteeWorkflow).toContain("GITEE_TAG: build-${{ github.event.workflow_run.run_number }}");
-    expect(giteeWorkflow).toContain("scripts/publish-gitee-release.sh");
-    expect(giteeWorkflow).toContain("split --bytes=4M");
-    expect(giteeWorkflow).not.toContain("split --bytes=8M");
-    expect(giteeWorkflow).toContain("orderflow-desktop-windows.exe.sha256");
-    expect(giteeWorkflow).not.toContain("macos-dmg");
-    expect(giteeWorkflow).not.toContain("macos.dmg");
-
-    const giteePublisher = await readFile(path.join(root, "scripts/publish-gitee-release.sh"), "utf8");
-    expect(giteePublisher).toContain("upload_pids+set");
     const downloadPublisher = await readFile(path.join(root, "scripts/publish-download-server.sh"), "utf8");
     expect(downloadPublisher).toContain("/srv/orderflow-download/public");
     expect(downloadPublisher).toContain("orderflow-desktop-windows.exe.sha256");
     expect(downloadPublisher).toContain("latest.json.tmp");
+    expect(downloadPublisher).toContain("index.html.tmp");
   });
 });
