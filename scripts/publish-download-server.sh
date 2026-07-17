@@ -80,6 +80,42 @@ jq -n \
     ]
   }' > "${work_dir}/latest.json"
 
+cat > "${work_dir}/index.html" <<HTML
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>订单整理助手下载</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #f5f2eb; color: #1d1d1b; }
+    main { box-sizing: border-box; width: min(680px, calc(100% - 32px)); margin: 10vh auto; padding: 48px; background: #fff; border: 1px solid #d8d2c7; border-radius: 20px; }
+    h1 { margin: 0 0 12px; font-size: clamp(28px, 6vw, 44px); }
+    p { line-height: 1.65; color: #5d594f; }
+    .tag { margin-bottom: 28px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .downloads { display: grid; gap: 12px; }
+    .download { display: block; padding: 16px 20px; border-radius: 12px; background: #1d1d1b; color: #fff; text-decoration: none; font-weight: 650; }
+    .download.secondary { background: #e8e3d8; color: #1d1d1b; }
+    .footer { margin: 26px 0 0; font-size: 14px; }
+    .footer a { color: inherit; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>订单整理助手</h1>
+    <p>最新版安装包由 AUSMET 下载站直接提供。</p>
+    <p class="tag">${DOWNLOAD_TAG}</p>
+    <div class="downloads">
+      <a class="download" href="/releases/${DOWNLOAD_TAG}/orderflow-desktop-windows.exe">下载 Windows 便携版</a>
+      <a class="download secondary" href="/releases/${DOWNLOAD_TAG}/orderflow-desktop-mac.dmg">下载 macOS DMG</a>
+    </div>
+    <p class="footer"><a href="https://github.com/1192081163/OrderFlow/releases/latest">GitHub 备用下载</a></p>
+  </main>
+</body>
+</html>
+HTML
+
 ssh -o BatchMode=yes -o IdentitiesOnly=yes "${ssh_target}" \
   "set -e; rm -rf '${remote_staging}'; mkdir -p '${remote_staging}'"
 scp -q -o BatchMode=yes -o IdentitiesOnly=yes \
@@ -88,6 +124,7 @@ scp -q -o BatchMode=yes -o IdentitiesOnly=yes \
   "${work_dir}/orderflow-desktop-windows.exe.sha256" \
   "${work_dir}/orderflow-desktop-mac.dmg.sha256" \
   "${work_dir}/latest.json" \
+  "${work_dir}/index.html" \
   "${ssh_target}:${remote_staging}/"
 
 ssh -o BatchMode=yes -o IdentitiesOnly=yes "${ssh_target}" "set -e
@@ -102,6 +139,8 @@ if ! mv '${remote_staging}' '${remote_target}'; then
 fi
 install -m 0644 '${remote_target}/latest.json' '${remote_root}/latest.json.tmp'
 mv '${remote_root}/latest.json.tmp' '${remote_root}/latest.json'
+install -m 0644 '${remote_target}/index.html' '${remote_root}/index.html.tmp'
+mv '${remote_root}/index.html.tmp' '${remote_root}/index.html'
 rm -rf '${remote_previous}'"
 
 trap - EXIT

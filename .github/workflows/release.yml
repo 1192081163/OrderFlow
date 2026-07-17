@@ -128,14 +128,6 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
-      - name: Enforce Gitee 100 MB asset limit
-        shell: pwsh
-        run: |
-          $asset = Get-Item "release/${{ env.ASSET_BASENAME }}-windows.exe"
-          if ($asset.Length -ge 100MB) {
-            throw "Windows artifact is $($asset.Length) bytes; Gitee requires it to be smaller than 100 MB."
-          }
-
   build-macos:
     name: Build macOS DMG
     if: github.event_name != 'pull_request'

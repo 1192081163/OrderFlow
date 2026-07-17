@@ -4,13 +4,13 @@
 
 ## 下载桌面版
 
-普通用户不需要安装 Node.js、Python 或开发依赖。国内 Windows 用户打开 [Gitee Release](https://gitee.com/wei-dongyu_1_0/OrderFlow/releases)，下载最新版本的：
+普通用户不需要安装 Node.js、Python 或开发依赖。打开 [AUSMET 下载站](https://download.ausmet.ai/)，下载最新版本的：
 
 ```text
 orderflow-desktop-windows.exe
 ```
 
-GitHub 作为源仓库和备用下载入口；Mac 用户打开 [GitHub Latest Release](https://github.com/1192081163/OrderFlow/releases/latest)，下载：
+Windows 使用上面的 exe；Mac 下载：
 
 ```text
 orderflow-desktop-mac.dmg
@@ -93,9 +93,9 @@ npm run dist:mac
 release/orderflow-desktop-mac.dmg
 ```
 
-## Release 与国内镜像
+## Release 与下载站
 
-推送到 `main` 后，GitHub Actions 会自动测试、打包并创建新的 GitHub Latest Release，同时把源码、标签和 Windows 便携版同步到 Gitee。应用检查更新时优先访问 Gitee，Gitee 不可用时再回退 GitHub：
+推送到 `main` 后，GitHub Actions 会自动测试、打包并创建新的 [GitHub Latest Release](https://github.com/1192081163/OrderFlow/releases/latest)，同时把 Windows 和 macOS 安装包发布到 AUSMET 下载站。应用检查更新时优先访问 AUSMET 下载站，下载站不可用时再回退 GitHub：
 
 ```text
 orderflow-desktop-windows.exe
